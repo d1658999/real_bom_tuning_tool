@@ -69,12 +69,12 @@ class FleetResult:
 def _get_tunable_ports(app_state) -> List[tuple]:
     """
     Return list of (network_id, port_index, term_type) for tunable ports.
-    Tunable = term_type in ('capacitor', 'inductor').
+    Tunable = term_type in ('capacitor', 'inductor', 'open/ind/cap').
     """
     tunable = []
     for fid, fc in app_state.files.items():
         for pnum, pc in fc.ports.items():
-            if pc.term_type in ('capacitor', 'inductor'):
+            if pc.term_type in ('capacitor', 'inductor', 'open/ind/cap'):
                 tunable.append((fid, pnum, pc.term_type))
     return tunable
 
@@ -86,7 +86,9 @@ def _build_config_with_assignments(
 ) -> NetworkConfig:
     """
     Clone base_config and apply component assignments to tunable ports.
-    assignments: list of component dicts (or None for 'open')
+    assignments: list of component dicts (or None for 'open').
+    Each component dict may carry a 'comp_type' key ('capacitor'|'inductor')
+    used when the port type is 'open/ind/cap'.
     """
     import copy
     cfg = copy.deepcopy(base_config)
@@ -95,7 +97,9 @@ def _build_config_with_assignments(
             cfg.terminations[nid][pnum].type = 'open'
             cfg.terminations[nid][pnum].component_path = None
         else:
-            cfg.terminations[nid][pnum].type = ttype
+            # For open/ind/cap ports, the actual type lives in comp['comp_type']
+            resolved_type = comp.get('comp_type', ttype)
+            cfg.terminations[nid][pnum].type = resolved_type
             cfg.terminations[nid][pnum].component_path = comp['path']
     return cfg
 
@@ -215,6 +219,8 @@ class FleetOptimizer:
                 term.type = pc.term_type
                 if pc.term_type in ('capacitor', 'inductor'):
                     term.component_path = pc.component_path
+                elif pc.term_type == 'open/ind/cap':
+                    term.type = 'open'  # baseline; fleet will override per-combination
                 elif pc.term_type == 'connect':
                     term.connect_to = (pc.connect_to_file, pc.connect_to_port)
                 elif pc.term_type == 'signal':
@@ -225,9 +231,18 @@ class FleetOptimizer:
     def _get_candidate_components(self, term_type: str) -> List[dict]:
         """Get list of component candidates for a given type."""
         if term_type == 'capacitor':
-            return [{'name': c['name'], 'path': c['path']} for c in list_capacitors()]
+            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
+                    for c in list_capacitors()]
         elif term_type == 'inductor':
-            return [{'name': i['name'], 'path': i['path']} for i in list_inductors()]
+            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
+                    for i in list_inductors()]
+        elif term_type == 'open/ind/cap':
+            # Sweep all capacitors AND all inductors (open is always included as None)
+            caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
+                    for c in list_capacitors()]
+            inds = [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
+                    for i in list_inductors()]
+            return caps + inds
         return []
 
     def _sweep_all_combinations(
@@ -353,8 +368,10 @@ class FleetOptimizer:
                     network_id=nid, port_index=pnum, term_type='open'
                 ))
             else:
+                # For open/ind/cap ports, use the resolved comp_type
+                resolved_type = comp.get('comp_type', ttype)
                 assignments.append(ComponentAssignment(
-                    network_id=nid, port_index=pnum, term_type=ttype,
+                    network_id=nid, port_index=pnum, term_type=resolved_type,
                     component_name=comp['name'], component_path=comp['path']
                 ))
 
