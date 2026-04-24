@@ -11,7 +11,7 @@ from rf_network_tool.gui import AppState, PortConfig
 from rf_network_tool.backend import bom_parser
 
 
-TERM_TYPES = ["open", "short", "capacitor", "inductor", "open/ind/cap", "connect", "signal"]
+TERM_TYPES = ["open", "short", "capacitor", "inductor", "open/ind", "open/cap", "open/ind/cap", "connect", "signal"]
 _CAP_LIST = None
 _IND_LIST = None
 
@@ -181,6 +181,16 @@ class PortConfigPanel(QWidget):
     def _build_component_widget(self, term: str, file_id: str, port_num: int, pc: PortConfig) -> QWidget:
         if term in ("open", "short"):
             return QLabel("")
+
+        elif term == "open/ind":
+            label = QLabel("🔍 Fleet sweeps: open + all inductors")
+            label.setStyleSheet("color: #0066cc; font-style: italic;")
+            return label
+
+        elif term == "open/cap":
+            label = QLabel("🔍 Fleet sweeps: open + all capacitors")
+            label.setStyleSheet("color: #0066cc; font-style: italic;")
+            return label
 
         elif term == "open/ind/cap":
             label = QLabel("🔍 Fleet sweeps: open + all inductors + all capacitors")

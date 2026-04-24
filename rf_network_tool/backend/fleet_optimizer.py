@@ -82,14 +82,15 @@ def _get_tunable_ports(app_state) -> List[tuple]:
     """
     Return list of (network_id, port_index, term_type) for tunable (swept) ports.
 
-    Only 'open/ind/cap' ports are swept during fleet optimization.
+    'open/ind', 'open/cap', and 'open/ind/cap' ports are swept during fleet optimization.
     Ports set to 'capacitor' or 'inductor' with a specific component already
     selected are treated as FIXED — the fleet uses that component as-is.
     """
+    SWEEP_TYPES = {'open/ind', 'open/cap', 'open/ind/cap'}
     tunable = []
     for fid, fc in app_state.files.items():
         for pnum, pc in fc.ports.items():
-            if pc.term_type == 'open/ind/cap':
+            if pc.term_type in SWEEP_TYPES:
                 tunable.append((fid, pnum, pc.term_type))
     return tunable
 
@@ -239,7 +240,7 @@ class FleetOptimizer:
                 term.type = pc.term_type
                 if pc.term_type in ('capacitor', 'inductor'):
                     term.component_path = pc.component_path
-                elif pc.term_type == 'open/ind/cap':
+                elif pc.term_type in ('open/ind', 'open/cap', 'open/ind/cap'):
                     term.type = 'open'  # baseline; fleet will override per-combination
                 elif pc.term_type == 'connect':
                     term.connect_to = (pc.connect_to_file, pc.connect_to_port)
@@ -256,6 +257,14 @@ class FleetOptimizer:
         elif term_type == 'inductor':
             return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
                     for i in list_inductors()]
+        elif term_type == 'open/ind':
+            # Sweep all inductors only (open is always included as None)
+            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
+                    for i in list_inductors()]
+        elif term_type == 'open/cap':
+            # Sweep all capacitors only (open is always included as None)
+            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
+                    for c in list_capacitors()]
         elif term_type == 'open/ind/cap':
             # Sweep all capacitors AND all inductors (open is always included as None)
             caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
