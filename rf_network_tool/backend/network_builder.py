@@ -127,8 +127,9 @@ class NetworkBuilder:
             )
 
         # Reorder ports if needed so port 0 = s1, port 1 = s2
+        # NOTE: skrf renumber() is in-place and returns None — do NOT reassign
         if k1 != 0 or k2 != 1:
-            super_net = super_net.renumber([k1, k2], [0, 1])
+            super_net.renumber([k1, k2], [0, 1])
 
         return super_net
 
@@ -225,8 +226,116 @@ class NetworkBuilder:
             s = np.ones((nf, 1, 1), dtype=complex)
             return rf.Network(frequency=freq, s=s)
 
+    @staticmethod
+    def _build_termination_network_static(term: PortTermination, freq: rf.Frequency) -> rf.Network:
+        """Static wrapper for _build_termination_network (used by Rust-accelerated sweep)."""
+        dummy = NetworkBuilder.__new__(NetworkBuilder)
+        return dummy._build_termination_network(term, freq)
+
 
 def build_network_from_config(config: NetworkConfig) -> rf.Network:
     """Convenience function: build and return 2-port network from config."""
     builder = NetworkBuilder(config)
     return builder.build()
+
+
+def build_base_network_for_fleet(
+    config: NetworkConfig,
+    tunable_port_keys: list  # list of (network_id, 1-based port_num)
+) -> tuple:
+    """
+    Build the base network for Rust-accelerated fleet sweep.
+
+    Like build() but:
+    - Does NOT terminate tunable ports (leaves them as open ports in the network)
+    - Reorders remaining ports to: [s1=0, s2=1, t0=2, t1=3, ..., tk=N-1]
+
+    Returns:
+        (net, ordered_port_keys)
+        net: rf.Network with ports [s1, s2, t0, t1, ..., tk]
+        ordered_port_keys: [(nid, pnum), ...] matching net port indices
+    """
+    builder = NetworkBuilder(config)
+    nets = builder._load_networks()
+
+    # Build port map: (nid, 1-based) -> 0-based global index
+    port_map: dict = {}
+    offset = 0
+    for nid in nets:
+        for p in range(nets[nid].nports):
+            port_map[(nid, p + 1)] = offset + p
+        offset += nets[nid].nports
+
+    # Block-diagonal super-network
+    super_net = builder._block_diagonal(list(nets.values()))
+
+    tunable_set = set(tuple(k) for k in tunable_port_keys)
+
+    # Apply inter-network connections (innerconnect)
+    seen_pairs = set()
+    for nid, terms in config.terminations.items():
+        for port, term in terms.items():
+            if term.type != 'connect':
+                continue
+            cid, cport = term.connect_to
+            pair = tuple(sorted([(nid, port), (cid, cport)]))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            k = port_map[(nid, port)]
+            l = port_map[(cid, cport)]
+            super_net = innerconnect(super_net, k, l)
+            port_map = builder._update_port_map_innerconnect(
+                port_map, k, l, (nid, port), (cid, cport)
+            )
+
+    # Find signal port indices BEFORE terminating
+    signal_ports = {}
+    for nid, terms in config.terminations.items():
+        for port, term in terms.items():
+            if term.type == 'signal':
+                signal_ports[term.signal_port_index] = (nid, port)
+
+    # Apply FIXED terminations only (skip tunable and signal and connect)
+    for nid, terms in config.terminations.items():
+        for port, term in terms.items():
+            if term.type in ('connect', 'signal'):
+                continue
+            if (nid, port) in tunable_set:
+                continue  # leave tunable ports open in the network
+            if (nid, port) not in port_map:
+                continue
+            k = port_map[(nid, port)]
+            term_net = builder._build_termination_network(term, super_net.frequency)
+            super_net = connect(super_net, k, term_net, 0)
+            port_map = builder._update_port_map_connect(port_map, k, (nid, port))
+
+    # Reorder: [s1, s2, t0, t1, ..., tk]
+    if not signal_ports.get(1) or not signal_ports.get(2):
+        raise ValueError("Must define s1 and s2 signal ports")
+
+    k1 = port_map[signal_ports[1]]  # s1 current index
+    k2 = port_map[signal_ports[2]]  # s2 current index
+
+    tunable_indices = [port_map[tuple(k)] for k in tunable_port_keys
+                       if tuple(k) in port_map]
+
+    desired_order = [k1, k2] + tunable_indices
+    to_ports = list(range(len(desired_order)))
+
+    if len(desired_order) != super_net.nports:
+        raise ValueError(
+            f"Port count mismatch: {super_net.nports} ports in network but "
+            f"{len(desired_order)} in desired order. "
+            "Check that all non-signal, non-tunable ports are terminated."
+        )
+
+    # NOTE: skrf renumber() is in-place and returns None — do NOT reassign
+    super_net.renumber(desired_order, to_ports)
+
+    # Build ordered_port_keys: [signal_1_key, signal_2_key, t0_key, ...]
+    ordered_port_keys = [signal_ports[1], signal_ports[2]] + [
+        tuple(k) for k in tunable_port_keys if tuple(k) in port_map
+    ]
+
+    return super_net, ordered_port_keys

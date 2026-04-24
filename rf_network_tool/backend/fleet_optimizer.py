@@ -23,6 +23,13 @@ import os
 from .bom_parser import list_capacitors, list_inductors
 from .network_builder import NetworkConfig, PortTermination, build_network_from_config
 
+# Try to import the Rust extension for accelerated sweeps
+try:
+    import rf_sweep as _rf_sweep
+    _RUST_AVAILABLE = True
+except ImportError:
+    _RUST_AVAILABLE = False
+
 
 @dataclass
 class ComponentAssignment:
@@ -253,20 +260,126 @@ class FleetOptimizer:
     ) -> List[dict]:
         """
         Sweep all combinations of components for tunable ports.
-        Each combination includes 'open' as an option.
+        Uses Rust extension if available, falls back to pure Python.
         Returns list of {assignments, metrics} dicts.
         """
         candidates_per_port = []
         for nid, pnum, ttype in tunable_ports:
             comps = self._get_candidate_components(ttype)
-            # Include None (open) as an option
-            candidates_per_port.append([None] + comps)
+            candidates_per_port.append([None] + comps)  # None = open
 
         total = 1
         for c in candidates_per_port:
             total *= len(c)
-        self._log(f"  Total combinations to evaluate: {total:,}")
+        self._log(f"  Total combinations: {total:,}")
 
+        if _RUST_AVAILABLE and len(tunable_ports) > 0:
+            return self._sweep_rust(base_config, tunable_ports, candidates_per_port, total)
+        else:
+            if not _RUST_AVAILABLE:
+                self._log("  [WARNING] rf_sweep Rust module not found, using Python fallback")
+            return self._sweep_python(base_config, tunable_ports, candidates_per_port, total)
+
+    def _sweep_rust(
+        self, base_config: NetworkConfig, tunable_ports: List[tuple],
+        candidates_per_port: List[list], total: int
+    ) -> List[dict]:
+        """Rust-accelerated sweep using pre-built base network."""
+        import rf_sweep
+        import numpy as np
+        from .network_builder import build_base_network_for_fleet
+
+        self._log("  [Rust] Building base network...")
+        tunable_keys = [(nid, pnum) for nid, pnum, _ in tunable_ports]
+
+        try:
+            base_net, ordered_keys = build_base_network_for_fleet(base_config, tunable_keys)
+            nfreq = len(base_net.frequency)
+            f_ghz = base_net.frequency.f / 1e9
+            mask = (f_ghz >= base_config.freq_start_ghz) & (f_ghz <= base_config.freq_stop_ghz)
+            eval_indices = np.where(mask)[0]
+        except Exception as e:
+            self._log(f"  [Rust] Base network build failed: {e}, falling back to Python")
+            return self._sweep_python(base_config, tunable_ports, candidates_per_port, total)
+
+        if len(eval_indices) == 0:
+            self._log("  [Rust] No freq points in range, falling back to Python")
+            return self._sweep_python(base_config, tunable_ports, candidates_per_port, total)
+        eval_start, eval_stop = int(eval_indices[0]), int(eval_indices[-1])
+
+        self._log(f"  [Rust] Base network: {base_net.nports} ports, {nfreq} freq points")
+        self._log(f"  [Rust] Eval range indices: {eval_start}..{eval_stop}")
+
+        # Build gamma arrays per tunable port: shape (n_cands, nfreq)
+        # Row 0 = open (Γ = +1), rows 1..n_cands-1 = component gammas
+        self._log("  [Rust] Pre-loading termination gammas...")
+        term_gammas_re = []
+        term_gammas_im = []
+        all_candidates = []  # parallel list to candidates_per_port
+
+        for (nid, pnum, ttype), comps in zip(tunable_ports, candidates_per_port):
+            n_cands = len(comps)
+            gamma_re = np.zeros((n_cands, nfreq), dtype=np.float64)
+            gamma_im = np.zeros((n_cands, nfreq), dtype=np.float64)
+
+            for c_idx, comp in enumerate(comps):
+                if comp is None:
+                    # open: Γ = +1
+                    gamma_re[c_idx, :] = 1.0
+                else:
+                    # Build 1-port shunt termination, extract S11
+                    from .network_builder import PortTermination
+                    term = PortTermination(
+                        type=comp.get('comp_type', ttype),
+                        component_path=comp['path']
+                    )
+                    from .network_builder import NetworkBuilder
+                    term_net_1port = NetworkBuilder._build_termination_network_static(
+                        term, base_net.frequency
+                    )
+                    gamma_re[c_idx, :] = term_net_1port.s[:, 0, 0].real
+                    gamma_im[c_idx, :] = term_net_1port.s[:, 0, 0].imag
+
+            term_gammas_re.append(gamma_re)
+            term_gammas_im.append(gamma_im)
+            all_candidates.append(comps)
+
+        # Call Rust
+        self._log(f"  [Rust] Launching parallel sweep ({total:,} combinations)...")
+        base_s = base_net.s  # (nfreq, N, N) complex128
+
+        vswr_s11, vswr_s22, worst_il, combo_indices = rf_sweep.sweep_terminations_parallel(
+            np.ascontiguousarray(base_s.real, dtype=np.float64),
+            np.ascontiguousarray(base_s.imag, dtype=np.float64),
+            [np.ascontiguousarray(g, dtype=np.float64) for g in term_gammas_re],
+            [np.ascontiguousarray(g, dtype=np.float64) for g in term_gammas_im],
+            eval_start,
+            eval_stop,
+        )
+        self._log(f"  [Rust] Sweep complete: {len(vswr_s11):,} valid combinations")
+
+        # Pack results into the same format as _sweep_python
+        results = []
+        for i in range(len(vswr_s11)):
+            assignments = [all_candidates[p][combo_indices[i, p]] for p in range(len(tunable_ports))]
+            results.append({
+                'assignments': assignments,
+                'net': None,   # lazy: will be built on demand for the winner
+                'vswr_s11_max': float(vswr_s11[i]),
+                'vswr_s22_max': float(vswr_s22[i]),
+                'worst_il_db': float(worst_il[i]),
+                'freq_ghz': [],
+                's11_mag': [],
+                's22_mag': [],
+                's21_db': [],
+            })
+        return results
+
+    def _sweep_python(
+        self, base_config: NetworkConfig, tunable_ports: List[tuple],
+        candidates_per_port: List[list], total: int
+    ) -> List[dict]:
+        """Pure-Python fallback sweep (original implementation)."""
         results = []
         for i, combo in enumerate(itertools.product(*candidates_per_port)):
             if i % max(1, total // 20) == 0:
@@ -281,8 +394,7 @@ class FleetOptimizer:
                     **ev,
                 })
             except Exception:
-                pass  # skip invalid configs
-
+                pass
         self._log(f"  Valid evaluations: {len(results)}/{total}")
         return results
 
@@ -349,8 +461,14 @@ class FleetOptimizer:
         elif agent_id == 4:
             name = "Agent 4 - Smith Contour"
             strategy = "Minimize Smith chart contour area (tightest cluster near center)"
-            best = min(all_results,
-                      key=lambda r: self._smith_spread(r['net'], base_config.freq_start_ghz, base_config.freq_stop_ghz))
+            if all_results and all_results[0]['net'] is not None:
+                best = min(all_results,
+                          key=lambda r: self._smith_spread(r['net'], base_config.freq_start_ghz, base_config.freq_stop_ghz))
+            else:
+                # Rust path: use vswr_spread as proxy for Smith contour tightness
+                best = min(all_results,
+                          key=lambda r: abs(r['vswr_s11_max'] - r['vswr_s22_max']) +
+                                        max(r['vswr_s11_max'], r['vswr_s22_max']))
 
         elif agent_id == 5:
             name = "Agent 5 - Min IL"
@@ -359,6 +477,16 @@ class FleetOptimizer:
 
         else:
             raise ValueError(f"Unknown agent_id {agent_id}")
+
+        # If net was not pre-computed (Rust path), build it now for the winner
+        if best.get('net') is None:
+            try:
+                cfg = _build_config_with_assignments(base_config, tunable_ports, best['assignments'])
+                best['net'] = build_network_from_config(cfg)
+                ev = _evaluate_network(best['net'], base_config.freq_start_ghz, base_config.freq_stop_ghz)
+                best.update(ev)
+            except Exception as e:
+                self._log(f"  [Agent {agent_id}] Lazy rebuild failed: {e}")
 
         # Count components
         count = self._count_components(best['assignments'])

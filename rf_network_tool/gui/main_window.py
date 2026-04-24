@@ -57,6 +57,8 @@ class _FleetWorker(QObject):
             optimizer.run(output_dir=self._output_dir)
             self.finished.emit(self._output_dir)
         except Exception as e:
+            import traceback
+            self.progress.emit(f"\n[TRACEBACK]\n{traceback.format_exc()}")
             self.error.emit(str(e))
 
 
