@@ -62,6 +62,11 @@ class AgentResult:
     s11_mag: List[float] = field(default_factory=list)
     s22_mag: List[float] = field(default_factory=list)
     s21_db: List[float] = field(default_factory=list)
+    # Complex S-params for Smith chart (real/imag split to keep JSON-serialisable)
+    s11_re: List[float] = field(default_factory=list)
+    s11_im: List[float] = field(default_factory=list)
+    s22_re: List[float] = field(default_factory=list)
+    s22_im: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -143,6 +148,11 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
         's11_mag': np.abs(s11).tolist(),
         's22_mag': np.abs(s22).tolist(),
         's21_db': il_db.tolist(),
+        # Complex S-params for Smith chart plotting (real/imag split)
+        's11_re': np.real(s11).tolist(),
+        's11_im': np.imag(s11).tolist(),
+        's22_re': np.real(s22).tolist(),
+        's22_im': np.imag(s22).tolist(),
     }
 
 
@@ -530,6 +540,10 @@ class FleetOptimizer:
             s11_mag=best['s11_mag'],
             s22_mag=best['s22_mag'],
             s21_db=best['s21_db'],
+            s11_re=best.get('s11_re', []),
+            s11_im=best.get('s11_im', []),
+            s22_re=best.get('s22_re', []),
+            s22_im=best.get('s22_im', []),
         )
 
     def _compute_risk_scores(self, agent_results: List[AgentResult]) -> Dict[str, float]:
@@ -576,7 +590,7 @@ class FleetOptimizer:
         s11 = np.array(result.s11_mag)
         s22 = np.array(result.s22_mag)
 
-        # Smith chart (normalized)
+        # Smith chart — plot actual S11/S22 locus using complex values
         ax = axes[0]
         ax.set_aspect('equal')
         ax.set_xlim(-1.1, 1.1)
@@ -585,9 +599,17 @@ class FleetOptimizer:
         ax.plot(np.cos(theta), np.sin(theta), 'k-', lw=0.5)
         ax.axhline(0, color='k', lw=0.3)
         ax.axvline(0, color='k', lw=0.3)
-        # VSWR=2 circle
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=0.8, label='VSWR=2')
+        # Plot actual S11/S22 locus
+        if result.s11_re:
+            s11_re = np.array(result.s11_re)
+            s11_im = np.array(result.s11_im)
+            ax.plot(s11_re, s11_im, 'b-', lw=1.5, label='S11')
+        if result.s22_re:
+            s22_re = np.array(result.s22_re)
+            s22_im = np.array(result.s22_im)
+            ax.plot(s22_re, s22_im, 'r-', lw=1.5, label='S22')
         ax.set_title('Smith Chart')
         ax.set_xlabel('Re(Γ)')
         ax.legend(fontsize=7)
@@ -665,7 +687,7 @@ class FleetOptimizer:
         s22 = np.array(winner.s22_mag)
         theta = np.linspace(0, 2*np.pi, 360)
 
-        # Smith
+        # Smith — plot actual S11/S22 locus using complex values
         ax = axes[0]
         ax.set_aspect('equal')
         ax.set_xlim(-1.1, 1.1)
@@ -675,7 +697,13 @@ class FleetOptimizer:
         ax.axvline(0, color='k', lw=0.3)
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=1.2, label='VSWR=2')
+        # Plot actual S11/S22 locus
+        if winner.s11_re:
+            ax.plot(np.array(winner.s11_re), np.array(winner.s11_im), 'b-', lw=2, label='S11')
+        if winner.s22_re:
+            ax.plot(np.array(winner.s22_re), np.array(winner.s22_im), 'r-', lw=2, label='S22')
         ax.set_title('Smith Chart (Final)')
+        ax.set_xlabel('Re(Γ)')
         ax.legend(fontsize=8)
 
         # VSWR
