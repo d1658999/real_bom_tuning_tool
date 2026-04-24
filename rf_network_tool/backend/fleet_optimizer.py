@@ -480,7 +480,9 @@ class FleetOptimizer:
         elif agent_id == 4:
             name = "Agent 4 - Smith Contour"
             strategy = "Minimize Smith chart contour area (tightest cluster near center)"
-            if all_results and all_results[0]['net'] is not None:
+            # Check ALL results — previous agents may have lazily rebuilt some nets,
+            # so checking only [0] is unreliable for Rust-path results.
+            if all_results and all(r.get('net') is not None for r in all_results):
                 best = min(all_results,
                           key=lambda r: self._smith_spread(r['net'], base_config.freq_start_ghz, base_config.freq_stop_ghz))
             else:
@@ -497,7 +499,10 @@ class FleetOptimizer:
         else:
             raise ValueError(f"Unknown agent_id {agent_id}")
 
-        # If net was not pre-computed (Rust path), build it now for the winner
+        # If net was not pre-computed (Rust path), build it now for the winner.
+        # Work on a shallow copy so we don't mutate the shared all_results list
+        # (other agents still need clean net=None entries to detect the Rust path).
+        best = dict(best)
         if best.get('net') is None:
             try:
                 cfg = _build_config_with_assignments(base_config, tunable_ports, best['assignments'])
@@ -526,10 +531,15 @@ class FleetOptimizer:
                 ))
 
         # Tolerance analysis
-        tol = _evaluate_with_tolerance(
-            base_config, tunable_ports, best['assignments'],
-            base_config.freq_start_ghz, base_config.freq_stop_ghz
-        )
+        try:
+            tol = _evaluate_with_tolerance(
+                base_config, tunable_ports, best['assignments'],
+                base_config.freq_start_ghz, base_config.freq_stop_ghz
+            )
+        except Exception as e:
+            self._log(f"  [Agent {agent_id}] Tolerance analysis failed: {e}")
+            tol = {'vswr_5pct_max_s11': 0.0, 'vswr_5pct_max_s22': 0.0,
+                   'worst_il_5pct': 0.0, 'vswr_sensitivity': 0.0}
 
         return AgentResult(
             agent_id=agent_id,
