@@ -207,7 +207,14 @@ class PortConfigPanel(QWidget):
                 lambda idx, fid=file_id, pn=port_num, cb=combo:
                     self._on_component_changed(fid, pn, cb)
             )
-            return combo
+            container = QWidget()
+            h = QHBoxLayout(container)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.addWidget(combo, stretch=1)
+            lock = QLabel("🔒 Fixed in Fleet")
+            lock.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+            h.addWidget(lock)
+            return container
 
         elif term == "inductor":
             inds = _inductors()
@@ -228,7 +235,14 @@ class PortConfigPanel(QWidget):
                 lambda idx, fid=file_id, pn=port_num, cb=combo:
                     self._on_component_changed(fid, pn, cb)
             )
-            return combo
+            container = QWidget()
+            h = QHBoxLayout(container)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.addWidget(combo, stretch=1)
+            lock = QLabel("🔒 Fixed in Fleet")
+            lock.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+            h.addWidget(lock)
+            return container
 
         elif term == "connect":
             container = QWidget()

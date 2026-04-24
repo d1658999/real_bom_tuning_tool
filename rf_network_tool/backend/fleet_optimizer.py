@@ -68,13 +68,16 @@ class FleetResult:
 
 def _get_tunable_ports(app_state) -> List[tuple]:
     """
-    Return list of (network_id, port_index, term_type) for tunable ports.
-    Tunable = term_type in ('capacitor', 'inductor', 'open/ind/cap').
+    Return list of (network_id, port_index, term_type) for tunable (swept) ports.
+
+    Only 'open/ind/cap' ports are swept during fleet optimization.
+    Ports set to 'capacitor' or 'inductor' with a specific component already
+    selected are treated as FIXED — the fleet uses that component as-is.
     """
     tunable = []
     for fid, fc in app_state.files.items():
         for pnum, pc in fc.ports.items():
-            if pc.term_type in ('capacitor', 'inductor', 'open/ind/cap'):
+            if pc.term_type == 'open/ind/cap':
                 tunable.append((fid, pnum, pc.term_type))
     return tunable
 
