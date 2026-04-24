@@ -441,17 +441,17 @@ class FleetOptimizer:
 
         if agent_id == 1:
             name = "Agent 1 - Min BOM"
-            strategy = "Minimum component count meeting VSWR < 1.4"
-            # Filter by VSWR < 1.4, then minimize component count
-            filtered = [r for r in all_results
-                       if r['vswr_s11_max'] < 1.4 and r['vswr_s22_max'] < 1.4]
-            if not filtered:
-                # Relax to VSWR < 2.0
-                filtered = [r for r in all_results
-                           if r['vswr_s11_max'] < 2.0 and r['vswr_s22_max'] < 2.0]
-            if not filtered:
-                filtered = all_results
-            best = min(filtered, key=lambda r: (
+            strategy = "Fewest components within 10% of the best achievable VSWR"
+            # Determine the globally best (minimum) VSWR achievable across all candidates.
+            vswr_floor = min(max(r['vswr_s11_max'], r['vswr_s22_max']) for r in all_results)
+            # Accept results within 10% above the floor.  This prevents "open" (0 components)
+            # from winning just because it scrapes under a loose absolute threshold — it only
+            # wins if it genuinely comes close to what any component can achieve.
+            vswr_threshold = vswr_floor * 1.10
+            near_optimal = [r for r in all_results
+                            if max(r['vswr_s11_max'], r['vswr_s22_max']) <= vswr_threshold]
+            # Among near-optimal results, prefer fewest components; break ties by VSWR.
+            best = min(near_optimal, key=lambda r: (
                 self._count_components(r['assignments']),
                 max(r['vswr_s11_max'], r['vswr_s22_max'])
             ))
