@@ -133,7 +133,8 @@ class PortConfigPanel(QWidget):
         table = QTableWidget(fc.nports, 4)
         table.setHorizontalHeaderLabels(["Port #", "Label", "Termination", "Component / Connect"])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        table.setColumnWidth(1, 90)   # just wider than "Port 10"; user can still resize
         table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         table.verticalHeader().setVisible(False)
