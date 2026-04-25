@@ -1,11 +1,11 @@
 """Port Configuration Panel - configure terminations for each port of each file."""
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QScrollArea, QGroupBox,
     QTableWidget, QTableWidgetItem, QComboBox, QSpinBox, QLineEdit,
     QLabel, QDoubleSpinBox, QHeaderView, QSizePolicy
 )
 from PyQt5.QtCore import pyqtSignal, Qt
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from rf_network_tool.gui import AppState, PortConfig
 from rf_network_tool.backend import bom_parser
@@ -48,6 +48,8 @@ class PortConfigPanel(QWidget):
     def __init__(self, app_state: AppState, parent=None):
         super().__init__(parent)
         self.app_state = app_state
+        self._signal_freq_spinboxes: Dict[int, Tuple[QDoubleSpinBox, QDoubleSpinBox]] = {}
+        self._refreshing_signal_freq = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -94,6 +96,9 @@ class PortConfigPanel(QWidget):
         self.freq_stop_spin.valueChanged.connect(self._on_freq_changed)
         self.freq_pts_spin.valueChanged.connect(self._on_freq_changed)
 
+        # Per-signal frequency range group
+        outer.addWidget(self._create_signal_freq_group())
+
         # Scrollable area for per-file groups
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -104,6 +109,121 @@ class PortConfigPanel(QWidget):
         self.scroll_layout.addStretch()
         self.scroll.setWidget(self.scroll_contents)
         outer.addWidget(self.scroll, stretch=1)
+
+        self._refresh_signal_freq_group()
+
+    # ------------------------------------------------------------------
+    # Signal frequency range group
+    # ------------------------------------------------------------------
+
+    def _create_signal_freq_group(self) -> QGroupBox:
+        """Create collapsible group for per-signal frequency ranges."""
+        group = QGroupBox("Signal Frequency Ranges (Fleet)")
+        group.setVisible(False)
+        self._signal_freq_group = group
+        self._signal_freq_layout = QFormLayout()
+        group.setLayout(self._signal_freq_layout)
+        return group
+
+    def _refresh_signal_freq_group(self):
+        """Rebuild per-signal freq range rows based on current signal assignments."""
+        if self._refreshing_signal_freq:
+            return
+        self._refreshing_signal_freq = True
+        try:
+            signal_indices: set = set()
+            for fc in self.app_state.files.values():
+                for pc in fc.ports.values():
+                    if pc.term_type == "signal":
+                        signal_indices.add(pc.signal_index)
+
+            if len(signal_indices) < 2:
+                self._signal_freq_group.setVisible(False)
+                return
+
+            ant_idx = max(signal_indices)
+            non_ant = sorted(signal_indices - {ant_idx})
+
+            # Clear existing rows
+            while self._signal_freq_layout.rowCount() > 0:
+                self._signal_freq_layout.removeRow(0)
+            self._signal_freq_spinboxes.clear()
+
+            for sig_idx in non_ant:
+                start_val, stop_val = self.app_state.signal_freq_ranges.get(
+                    sig_idx, (self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz)
+                )
+
+                start_spin = QDoubleSpinBox()
+                start_spin.setRange(0.001, 100.0)
+                start_spin.setDecimals(3)
+                start_spin.setSuffix(" GHz")
+                start_spin.setValue(start_val)
+                start_spin.setFixedWidth(100)
+
+                stop_spin = QDoubleSpinBox()
+                stop_spin.setRange(0.001, 100.0)
+                stop_spin.setDecimals(3)
+                stop_spin.setSuffix(" GHz")
+                stop_spin.setValue(stop_val)
+                stop_spin.setFixedWidth(100)
+
+                self._signal_freq_spinboxes[sig_idx] = (start_spin, stop_spin)
+
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.addWidget(start_spin)
+                row_layout.addWidget(QLabel("–"))
+                row_layout.addWidget(stop_spin)
+                row_layout.addStretch()
+                self._signal_freq_layout.addRow(f"s{sig_idx}:", row_widget)
+
+                start_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_signal_freq_changed(si)
+                )
+                stop_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_signal_freq_changed(si)
+                )
+
+            # Read-only antenna union row
+            if self.app_state.signal_freq_ranges:
+                all_starts = [self.app_state.signal_freq_ranges.get(
+                    i, (self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz))[0]
+                    for i in non_ant]
+                all_stops = [self.app_state.signal_freq_ranges.get(
+                    i, (self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz))[1]
+                    for i in non_ant]
+                union_txt = f"{min(all_starts):.3f} – {max(all_stops):.3f} GHz (union)"
+            else:
+                union_txt = (f"{self.app_state.freq_start_ghz:.3f} – "
+                             f"{self.app_state.freq_stop_ghz:.3f} GHz (union)")
+            ant_label = QLabel(union_txt)
+            ant_label.setStyleSheet("color: gray; font-style: italic;")
+            self._signal_freq_layout.addRow(f"s{ant_idx} (ant):", ant_label)
+            self._ant_union_label = ant_label
+
+            self._signal_freq_group.setVisible(True)
+        finally:
+            self._refreshing_signal_freq = False
+
+    def _on_signal_freq_changed(self, signal_idx: int):
+        start_spin, stop_spin = self._signal_freq_spinboxes[signal_idx]
+        self.app_state.signal_freq_ranges[signal_idx] = (
+            start_spin.value(), stop_spin.value()
+        )
+        self._refresh_ant_union_label()
+        self.config_changed.emit()
+
+    def _refresh_ant_union_label(self):
+        """Update the read-only antenna union label."""
+        if not hasattr(self, '_ant_union_label') or not self._signal_freq_spinboxes:
+            return
+        all_starts = [v[0].value() for v in self._signal_freq_spinboxes.values()]
+        all_stops = [v[1].value() for v in self._signal_freq_spinboxes.values()]
+        self._ant_union_label.setText(
+            f"{min(all_starts):.3f} – {max(all_stops):.3f} GHz (union)"
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -120,6 +240,8 @@ class PortConfigPanel(QWidget):
         for file_id, fc in self.app_state.files.items():
             group = self._make_file_group(file_id, fc)
             self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, group)
+
+        self._refresh_signal_freq_group()
 
     # ------------------------------------------------------------------
     # Internal builders
@@ -451,6 +573,7 @@ class PortConfigPanel(QWidget):
         # Rebuild component widget
         widget = self._build_component_widget(term, file_id, port_num, pc)
         table.setCellWidget(row, 3, widget)
+        self._refresh_signal_freq_group()
         self.config_changed.emit()
 
     def _on_component_changed(self, file_id: str, port_num: int, combo: QComboBox):
@@ -474,4 +597,5 @@ class PortConfigPanel(QWidget):
         if file_id not in self.app_state.files:
             return
         self.app_state.files[file_id].ports[port_num].signal_index = signal_idx
+        self._refresh_signal_freq_group()
         self.config_changed.emit()

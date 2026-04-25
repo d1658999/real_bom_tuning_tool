@@ -11,7 +11,7 @@ import json
 import itertools
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 import skrf as rf
 import matplotlib
@@ -75,6 +75,7 @@ class AgentResult:
     sij_db_list:  List[List[float]] = field(default_factory=list)
     sii_re_list:  List[List[float]] = field(default_factory=list)
     sii_im_list:  List[List[float]] = field(default_factory=list)
+    freq_ghz_list: List[List[float]] = field(default_factory=list)  # per-port freq arrays
 
 
 @dataclass
@@ -135,9 +136,12 @@ def _build_config_with_assignments(
     return cfg
 
 
-def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> dict:
+def _evaluate_network(net: rf.Network, signal_freq_ranges: List[Tuple[float, float]]) -> dict:
     """
-    Evaluate an N-port network in the frequency range.
+    Evaluate an N-port network using per-signal-port frequency ranges.
+
+    signal_freq_ranges[i] = (start_ghz, stop_ghz) for port i (0-indexed, non-antenna).
+    Length = ant (= N-1). Antenna port mask = union of all non-antenna masks.
 
     Convention: antenna port = last port (index N-1).
     Returns a dict with composite scalars and per-port detail lists.
@@ -150,10 +154,20 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
     Legacy 2-port keys (s11_mag, s22_mag, s21_db, s11_re/im, s22_re/im) are
     populated from port 0 and the antenna port for backward compat with N=2.
     """
-    f_ghz = net.frequency.f / 1e9
-    mask = (f_ghz >= freq_start) & (f_ghz <= freq_stop)
     n = net.nports
     ant = n - 1  # antenna port index
+    f_ghz = net.frequency.f / 1e9
+
+    # Build per-signal-port masks
+    port_masks = []
+    for i in range(ant):
+        start, stop = signal_freq_ranges[i]
+        port_masks.append((f_ghz >= start) & (f_ghz <= stop))
+    # Antenna uses union of all non-antenna masks
+    ant_mask = np.zeros(len(f_ghz), dtype=bool)
+    for m in port_masks:
+        ant_mask |= m
+    port_masks.append(ant_mask)  # index = ant
 
     def vswr(s):
         mag = np.clip(np.abs(s), 0, 0.9999)
@@ -165,7 +179,7 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
     sii_im_list  = []
     vswr_per_port = []
     for i in range(n):
-        s_ii = net.s[mask, i, i]
+        s_ii = net.s[port_masks[i], i, i]
         sii_mag_list.append(np.abs(s_ii).tolist())
         sii_re_list.append(np.real(s_ii).tolist())
         sii_im_list.append(np.imag(s_ii).tolist())
@@ -175,7 +189,7 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
     sij_db_list = []
     worst_il_db = 0.0
     for i in range(ant):  # signal ports 0..ant-1
-        s_ant_i = net.s[mask, ant, i]
+        s_ant_i = net.s[port_masks[i], ant, i]
         il_db = 20 * np.log10(np.abs(s_ant_i) + 1e-15)
         sij_db_list.append(il_db.tolist())
         worst_il_db = min(worst_il_db, float(np.min(il_db)))
@@ -185,16 +199,20 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
     vswr_s22_max = float(np.max(vswr_per_port[ant]))
 
     # Legacy 2-port keys: port 0 and antenna
-    s11_legacy = net.s[mask, 0, 0]
-    s_ant_0    = net.s[mask, ant, 0]
+    s11_legacy = net.s[port_masks[0], 0, 0]
+    s_ant_0    = net.s[port_masks[0], ant, 0]
     il_legacy  = 20 * np.log10(np.abs(s_ant_0) + 1e-15)
+
+    # Per-port freq arrays
+    freq_ghz_list = [f_ghz[port_masks[i]].tolist() for i in range(n)]
 
     return {
         'vswr_s11_max': vswr_s11_max,
         'vswr_s22_max': vswr_s22_max,
         'worst_il_db':  worst_il_db,
-        'freq_ghz': f_ghz[mask].tolist(),
-        # Legacy fields (port 0 + antenna) for 2-port compat
+        'freq_ghz': f_ghz[port_masks[0]].tolist(),         # legacy: port-0 range
+        'freq_ghz_list': freq_ghz_list,                    # per-port freq arrays
+        # Legacy 2-port fields
         's11_mag': np.abs(s11_legacy).tolist(),
         's22_mag': sii_mag_list[ant],
         's21_db':  il_legacy.tolist(),
@@ -212,7 +230,7 @@ def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> d
 
 def _evaluate_with_tolerance(
     base_config: NetworkConfig, tunable_ports: List[tuple], assignments: List,
-    freq_start: float, freq_stop: float, n_tolerance: int = 3
+    signal_freq_ranges: List[Tuple[float, float]], n_tolerance: int = 3
 ) -> dict:
     """
     Evaluate network metrics under ±5% component S-parameter variation.
@@ -233,7 +251,7 @@ def _evaluate_with_tolerance(
     cfg_nominal = _build_config_with_assignments(base_config, tunable_ports, assignments)
     try:
         net_nominal = build_network_from_config(cfg_nominal)
-        m = _evaluate_network(net_nominal, freq_start, freq_stop)
+        m = _evaluate_network(net_nominal, signal_freq_ranges)
         nominal_vswr = max(m['vswr_s11_max'], m['vswr_s22_max'])
     except Exception:
         return {'vswr_5pct_max_s11': 99, 'vswr_5pct_max_s22': 99, 'worst_il_5pct': -99,
@@ -246,7 +264,7 @@ def _evaluate_with_tolerance(
         # (A more rigorous approach would scale L/C values, but this approximates variation)
         try:
             net = build_network_from_config(cfg)
-            ev = _evaluate_network(net, freq_start, freq_stop)
+            ev = _evaluate_network(net, signal_freq_ranges)
             worst_vswr_s11 = max(worst_vswr_s11, ev['vswr_s11_max'])
             worst_vswr_s22 = max(worst_vswr_s22, ev['vswr_s22_max'])
             worst_il = min(worst_il, ev['worst_il_db'])
@@ -303,6 +321,21 @@ class FleetOptimizer:
                     term.signal_port_index = pc.signal_index
                 cfg.terminations[fid][pnum] = term
         return cfg
+
+    def _get_signal_freq_ranges(self, n_signal_ports: int) -> List[Tuple[float, float]]:
+        """
+        Build a list of (start_ghz, stop_ghz) for each non-antenna signal port (0-indexed).
+        Length = n_signal_ports (ports 0..n_signal_ports-1).
+        Falls back to global freq if a signal index is not in signal_freq_ranges.
+        signal_index is 1-based (s1=1, s2=2, ...), port index is 0-based.
+        """
+        fallback = (self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz)
+        sfr = getattr(self.app_state, 'signal_freq_ranges', {})
+        result = []
+        for i in range(n_signal_ports):
+            sig_idx = i + 1  # 1-based signal index
+            result.append(sfr.get(sig_idx, fallback))
+        return result
 
     def _get_candidate_components(
         self, term_type: str,
@@ -404,7 +437,12 @@ class FleetOptimizer:
             base_net, ordered_keys = build_base_network_for_fleet(base_config, tunable_keys)
             nfreq = len(base_net.frequency)
             f_ghz = base_net.frequency.f / 1e9
-            mask = (f_ghz >= base_config.freq_start_ghz) & (f_ghz <= base_config.freq_stop_ghz)
+            # Build per-signal ranges and compute union for Rust pre-filter
+            n_signals = base_net.nports - len(tunable_ports)
+            sfr = self._get_signal_freq_ranges(n_signals)
+            union_start = min(r[0] for r in sfr)
+            union_stop  = max(r[1] for r in sfr)
+            mask = (f_ghz >= union_start) & (f_ghz <= union_stop)
             eval_indices = np.where(mask)[0]
         except Exception as e:
             self._log(f"  [Rust] Base network build failed: {e}, falling back to Python")
@@ -455,7 +493,7 @@ class FleetOptimizer:
         # Call Rust
         self._log(f"  [Rust] Launching parallel sweep ({total:,} combinations)...")
         base_s = base_net.s  # (nfreq, N, N) complex128
-        n_signals = base_net.nports - len(tunable_ports)
+        # n_signals already computed in the try block above
 
         vswr_s11, vswr_s22, worst_il, combo_indices = rf_sweep.sweep_terminations_parallel(
             np.ascontiguousarray(base_s.real, dtype=np.float64),
@@ -491,13 +529,16 @@ class FleetOptimizer:
     ) -> List[dict]:
         """Pure-Python fallback sweep (original implementation)."""
         results = []
+        sfr = None  # computed lazily from the first successfully built network
         for i, combo in enumerate(itertools.product(*candidates_per_port)):
             if i % max(1, total // 20) == 0:
                 self._log(f"  Progress: {i}/{total} ({100*i//total}%)")
             try:
                 cfg = _build_config_with_assignments(base_config, tunable_ports, list(combo))
                 net = build_network_from_config(cfg)
-                ev = _evaluate_network(net, base_config.freq_start_ghz, base_config.freq_stop_ghz)
+                if sfr is None:
+                    sfr = self._get_signal_freq_ranges(net.nports - 1)
+                ev = _evaluate_network(net, sfr)
                 results.append({
                     'assignments': list(combo),
                     'net': net,
@@ -595,14 +636,24 @@ class FleetOptimizer:
         # Work on a shallow copy so we don't mutate the shared all_results list
         # (other agents still need clean net=None entries to detect the Rust path).
         best = dict(best)
+        sfr = None  # will be set below
         if best.get('net') is None:
             try:
                 cfg = _build_config_with_assignments(base_config, tunable_ports, best['assignments'])
                 best['net'] = build_network_from_config(cfg)
-                ev = _evaluate_network(best['net'], base_config.freq_start_ghz, base_config.freq_stop_ghz)
+                n_sig_ports = best['net'].nports - 1
+                sfr = self._get_signal_freq_ranges(n_sig_ports)
+                ev = _evaluate_network(best['net'], sfr)
                 best.update(ev)
             except Exception as e:
                 self._log(f"  [Agent {agent_id}] Lazy rebuild failed: {e}")
+
+        # Ensure sfr is set (Python path or after Rust-path rebuild)
+        if sfr is None:
+            if best.get('net') is not None:
+                sfr = self._get_signal_freq_ranges(best['net'].nports - 1)
+            else:
+                sfr = [(self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz)]
 
         # Count components
         count = self._count_components(best['assignments'])
@@ -628,7 +679,7 @@ class FleetOptimizer:
         try:
             tol = _evaluate_with_tolerance(
                 base_config, tunable_ports, best['assignments'],
-                base_config.freq_start_ghz, base_config.freq_stop_ghz
+                sfr
             )
         except Exception as e:
             self._log(f"  [Agent {agent_id}] Tolerance analysis failed: {e}")
@@ -661,6 +712,7 @@ class FleetOptimizer:
             sij_db_list =best.get('sij_db_list',  []),
             sii_re_list =best.get('sii_re_list',  []),
             sii_im_list =best.get('sii_im_list',  []),
+            freq_ghz_list=best.get('freq_ghz_list', []),
         )
 
     def _compute_risk_scores(self, agent_results: List[AgentResult]) -> Dict[str, float]:
@@ -734,11 +786,12 @@ class FleetOptimizer:
         ax = axes[1]
         if result.sii_mag_list:
             for i, mag in enumerate(result.sii_mag_list):
+                freq_i = result.freq_ghz_list[i] if i < len(result.freq_ghz_list) else result.freq_ghz
+                freq_arr = np.array(freq_i)
                 s_arr = np.clip(np.array(mag), 0, 0.9999)
                 vswr_i = (1 + s_arr) / (1 - s_arr)
                 tag = " ANT" if i == ant else ""
-                lbl = f'VSWR S{i+1}{i+1}{tag}'
-                ax.plot(freq, vswr_i, color=COLORS[i % len(COLORS)], label=lbl)
+                ax.plot(freq_arr, vswr_i, color=COLORS[i % len(COLORS)], label=f'VSWR S{i+1}{i+1}{tag}')
         else:
             s11 = np.array(result.s11_mag); s22 = np.array(result.s22_mag)
             ax.plot(freq, (1+s11)/(1-np.clip(s11,0,0.9999)), 'b-',
@@ -754,7 +807,8 @@ class FleetOptimizer:
         ax = axes[2]
         if result.sij_db_list:
             for i, il in enumerate(result.sij_db_list):
-                ax.plot(freq, il, color=COLORS[i % len(COLORS)],
+                freq_i = result.freq_ghz_list[i] if i < len(result.freq_ghz_list) else result.freq_ghz
+                ax.plot(np.array(freq_i), il, color=COLORS[i % len(COLORS)],
                         label=f'S{ant+1}{i+1} IL')
         else:
             ax.plot(freq, result.s21_db, 'g-',
@@ -841,10 +895,12 @@ class FleetOptimizer:
         ax = axes[1]
         if winner.sii_mag_list:
             for i, mag in enumerate(winner.sii_mag_list):
+                freq_i = winner.freq_ghz_list[i] if i < len(winner.freq_ghz_list) else winner.freq_ghz
+                freq_arr = np.array(freq_i)
                 s_arr = np.clip(np.array(mag), 0, 0.9999)
                 vswr_i = (1 + s_arr) / (1 - s_arr)
                 tag = " ANT" if i == ant else ""
-                ax.plot(freq, vswr_i, color=COLORS[i % len(COLORS)],
+                ax.plot(freq_arr, vswr_i, color=COLORS[i % len(COLORS)],
                         label=f'VSWR S{i+1}{i+1}{tag}')
         else:
             s11 = np.array(winner.s11_mag); s22 = np.array(winner.s22_mag)
@@ -864,7 +920,8 @@ class FleetOptimizer:
         ax = axes[2]
         if winner.sij_db_list:
             for i, il in enumerate(winner.sij_db_list):
-                ax.plot(freq, il, color=COLORS[i % len(COLORS)],
+                freq_i = winner.freq_ghz_list[i] if i < len(winner.freq_ghz_list) else winner.freq_ghz
+                ax.plot(np.array(freq_i), il, color=COLORS[i % len(COLORS)],
                         label=f'S{ant+1}{i+1} IL')
         else:
             ax.plot(freq, winner.s21_db, 'g-',

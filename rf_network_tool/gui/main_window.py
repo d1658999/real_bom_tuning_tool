@@ -309,6 +309,10 @@ class MainWindow(QMainWindow):
             "freq_start_ghz": self.app_state.freq_start_ghz,
             "freq_stop_ghz":  self.app_state.freq_stop_ghz,
             "freq_npoints":   self.app_state.freq_npoints,
+            "signal_freq_ranges": {
+                str(k): [v[0], v[1]]
+                for k, v in self.app_state.signal_freq_ranges.items()
+            },
             "files": {}
         }
         for file_id, fc in self.app_state.files.items():
@@ -356,6 +360,11 @@ class MainWindow(QMainWindow):
         self.app_state.freq_start_ghz = data.get("freq_start_ghz", 3.3)
         self.app_state.freq_stop_ghz  = data.get("freq_stop_ghz",  5.0)
         self.app_state.freq_npoints   = data.get("freq_npoints",   201)
+        raw_sfr = data.get("signal_freq_ranges", {})
+        self.app_state.signal_freq_ranges = {
+            int(k): (float(v[0]), float(v[1]))
+            for k, v in raw_sfr.items()
+        }
         self.app_state.files.clear()
 
         for file_id, fd in data.get("files", {}).items():

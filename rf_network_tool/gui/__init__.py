@@ -1,6 +1,6 @@
 """GUI package for RF Network Tool."""
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -37,4 +37,6 @@ class AppState:
     freq_start_ghz: float = 3.3
     freq_stop_ghz: float = 5.0
     freq_npoints: int = 201
+    # per-signal (s1/s2/s3) freq eval bands; key=signal_index(1-based), value=(start_ghz, stop_ghz)
+    signal_freq_ranges: Dict[int, Tuple[float, float]] = field(default_factory=dict)
     result_network: object = None  # rf.Network or None
