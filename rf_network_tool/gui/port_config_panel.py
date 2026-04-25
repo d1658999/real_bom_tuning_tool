@@ -11,7 +11,13 @@ from rf_network_tool.gui import AppState, PortConfig
 from rf_network_tool.backend import bom_parser
 
 
-TERM_TYPES = ["open", "short", "capacitor", "inductor", "open/ind", "open/cap", "open/ind/cap", "connect", "signal"]
+TERM_TYPES = [
+    "open", "short",
+    "capacitor", "inductor",
+    "open/ind", "open/cap", "open/ind/cap",
+    "short/ind", "short/cap", "short/ind/cap",
+    "connect", "signal",
+]
 _CAP_LIST = None
 _IND_LIST = None
 
@@ -183,10 +189,12 @@ class PortConfigPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _build_range_widget(self, file_id: str, port_num: int, pc: PortConfig,
-                             show_ind: bool, show_cap: bool) -> QWidget:
+                             show_ind: bool, show_cap: bool,
+                             baseline: str = 'open') -> QWidget:
         """
         Compact widget with QDoubleSpinBox min/max limits and a live count label.
-        Shown for open/ind, open/cap, and open/ind/cap termination types.
+        Shown for open/* and short/* (series) termination types.
+        baseline: 'open' for shunt-to-ground types, 'short' for series types.
         """
         container = QWidget()
         h = QHBoxLayout(container)
@@ -224,7 +232,7 @@ class PortConfigPanel(QWidget):
                 parts.append(f"{n_ind} ind")
             if show_cap:
                 parts.append(f"{n_cap} cap")
-            count_label.setText(f"🔍 open + {' + '.join(parts)}")
+            count_label.setText(f"🔍 {baseline} + {' + '.join(parts)}")
 
         def _on_ind_changed():
             # clamp: min ≤ max
@@ -282,15 +290,33 @@ class PortConfigPanel(QWidget):
 
         elif term == "open/ind":
             return self._build_range_widget(file_id, port_num, pc,
-                                            show_ind=True, show_cap=False)
+                                            show_ind=True, show_cap=False,
+                                            baseline='open')
 
         elif term == "open/cap":
             return self._build_range_widget(file_id, port_num, pc,
-                                            show_ind=False, show_cap=True)
+                                            show_ind=False, show_cap=True,
+                                            baseline='open')
 
         elif term == "open/ind/cap":
             return self._build_range_widget(file_id, port_num, pc,
-                                            show_ind=True, show_cap=True)
+                                            show_ind=True, show_cap=True,
+                                            baseline='open')
+
+        elif term == "short/ind":
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=True, show_cap=False,
+                                            baseline='short')
+
+        elif term == "short/cap":
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=False, show_cap=True,
+                                            baseline='short')
+
+        elif term == "short/ind/cap":
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=True, show_cap=True,
+                                            baseline='short')
 
         elif term == "capacitor":
             caps = _capacitors()

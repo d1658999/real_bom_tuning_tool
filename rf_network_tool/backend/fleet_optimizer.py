@@ -82,11 +82,15 @@ def _get_tunable_ports(app_state) -> List[tuple]:
     """
     Return list of (network_id, port_index, term_type) for tunable (swept) ports.
 
-    'open/ind', 'open/cap', and 'open/ind/cap' ports are swept during fleet optimization.
+    open/* ports sweep with an 'open' baseline (shunt-to-ground components).
+    short/* ports sweep with a 'short' baseline (series components, other end open).
     Ports set to 'capacitor' or 'inductor' with a specific component already
     selected are treated as FIXED — the fleet uses that component as-is.
     """
-    SWEEP_TYPES = {'open/ind', 'open/cap', 'open/ind/cap'}
+    SWEEP_TYPES = {
+        'open/ind', 'open/cap', 'open/ind/cap',
+        'short/ind', 'short/cap', 'short/ind/cap',
+    }
     tunable = []
     for fid, fc in app_state.files.items():
         for pnum, pc in fc.ports.items():
@@ -102,18 +106,21 @@ def _build_config_with_assignments(
 ) -> NetworkConfig:
     """
     Clone base_config and apply component assignments to tunable ports.
-    assignments: list of component dicts (or None for 'open').
-    Each component dict may carry a 'comp_type' key ('capacitor'|'inductor')
-    used when the port type is 'open/ind/cap'.
+    assignments: list of component dicts (or None for the baseline — 'open' for open/* ports,
+    'short' for short/* ports).
+    Each component dict may carry a 'comp_type' key used when the port type is 'open/ind/cap'
+    or 'short/ind/cap'.
     """
     import copy
     cfg = copy.deepcopy(base_config)
     for (nid, pnum, ttype), comp in zip(tunable_ports, assignments):
         if comp is None:
-            cfg.terminations[nid][pnum].type = 'open'
+            # Baseline termination depends on the original port type
+            baseline = 'short' if ttype.startswith('short/') else 'open'
+            cfg.terminations[nid][pnum].type = baseline
             cfg.terminations[nid][pnum].component_path = None
         else:
-            # For open/ind/cap ports, the actual type lives in comp['comp_type']
+            # For open/ind/cap or short/ind/cap ports the actual type lives in comp['comp_type']
             resolved_type = comp.get('comp_type', ttype)
             cfg.terminations[nid][pnum].type = resolved_type
             cfg.terminations[nid][pnum].component_path = comp['path']
@@ -241,7 +248,9 @@ class FleetOptimizer:
                 if pc.term_type in ('capacitor', 'inductor'):
                     term.component_path = pc.component_path
                 elif pc.term_type in ('open/ind', 'open/cap', 'open/ind/cap'):
-                    term.type = 'open'  # baseline; fleet will override per-combination
+                    term.type = 'open'   # baseline; fleet will override per-combination
+                elif pc.term_type in ('short/ind', 'short/cap', 'short/ind/cap'):
+                    term.type = 'short'  # baseline; fleet will override per-combination
                 elif pc.term_type == 'connect':
                     term.connect_to = (pc.connect_to_file, pc.connect_to_port)
                 elif pc.term_type == 'signal':
@@ -286,6 +295,19 @@ class FleetOptimizer:
             caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor', 'value_pF': c.get('value_pF', 0.0)}
                     for c in list_capacitors() if _cap_ok(c)]
             inds = [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor', 'value_nH': i.get('value_nH', 0.0)}
+                    for i in list_inductors() if _ind_ok(i)]
+            return caps + inds
+        # --- series variants (short baseline, port 1 of S2P connected to open) ---
+        elif term_type == 'short/ind':
+            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor_series', 'value_nH': i.get('value_nH', 0.0)}
+                    for i in list_inductors() if _ind_ok(i)]
+        elif term_type == 'short/cap':
+            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor_series', 'value_pF': c.get('value_pF', 0.0)}
+                    for c in list_capacitors() if _cap_ok(c)]
+        elif term_type == 'short/ind/cap':
+            caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor_series', 'value_pF': c.get('value_pF', 0.0)}
+                    for c in list_capacitors() if _cap_ok(c)]
+            inds = [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor_series', 'value_nH': i.get('value_nH', 0.0)}
                     for i in list_inductors() if _ind_ok(i)]
             return caps + inds
         return []
@@ -364,8 +386,8 @@ class FleetOptimizer:
 
             for c_idx, comp in enumerate(comps):
                 if comp is None:
-                    # open: Γ = +1
-                    gamma_re[c_idx, :] = 1.0
+                    # Baseline: open (Γ = +1) for open/* types, short (Γ = -1) for short/* types
+                    gamma_re[c_idx, :] = -1.0 if ttype.startswith('short/') else 1.0
                 else:
                     # Build 1-port shunt termination, extract S11
                     from .network_builder import PortTermination
@@ -540,8 +562,10 @@ class FleetOptimizer:
         assignments = []
         for (nid, pnum, ttype), comp in zip(tunable_ports, best['assignments']):
             if comp is None:
+                # Baseline depends on the original port type: short/* → short, open/* → open
+                baseline = 'short' if ttype.startswith('short/') else 'open'
                 assignments.append(ComponentAssignment(
-                    network_id=nid, port_index=pnum, term_type='open'
+                    network_id=nid, port_index=pnum, term_type=baseline
                 ))
             else:
                 # For open/ind/cap ports, use the resolved comp_type
@@ -809,6 +833,8 @@ class FleetOptimizer:
         for a in winner.assignments:
             if a.term_type == 'open':
                 lines.append(f"- **{a.network_id} Port {a.port_index}**: Open")
+            elif a.term_type == 'short':
+                lines.append(f"- **{a.network_id} Port {a.port_index}**: Short")
             else:
                 lines.append(
                     f"- **{a.network_id} Port {a.port_index}**: "

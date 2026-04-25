@@ -195,10 +195,11 @@ class NetworkBuilder:
         """
         Build a 1-port termination network.
 
-        - open:       S11 = +1 everywhere (total reflection, no current)
-        - short:      S11 = -1 everywhere (short to ground)
-        - capacitor/inductor (shunt): load .s2p series model, connect port 1 to short
-          (ground) → returns 1-port shunt element seen from port 0.
+        - open:                    S11 = +1 (total reflection, no current)
+        - short:                   S11 = -1 (short to ground)
+        - capacitor/inductor:      .s2p shunt element — port 1 connected to SHORT (ground)
+        - capacitor_series/        .s2p series element — port 1 connected to OPEN (floating),
+          inductor_series:         giving series-mode (not shunt-to-ground) behaviour.
         """
         nf = len(freq)
 
@@ -215,11 +216,20 @@ class NetworkBuilder:
                 raise ValueError(f"No component path for {term.type} termination")
             comp = rf.Network(term.component_path)
             comp = comp.interpolate(freq)
-            # Shunt model: connect comp port 1 (index 1) to short → 1-port remains
+            # Shunt model: connect port 1 to short (ground) → 1-port shunt element
             short_s = -np.ones((nf, 1, 1), dtype=complex)
             short = rf.Network(frequency=freq, s=short_s)
-            shunt_1port = connect(comp, 1, short, 0)
-            return shunt_1port
+            return connect(comp, 1, short, 0)
+
+        elif term.type in ('capacitor_series', 'inductor_series'):
+            if not term.component_path:
+                raise ValueError(f"No component path for {term.type} termination")
+            comp = rf.Network(term.component_path)
+            comp = comp.interpolate(freq)
+            # Series model: connect port 1 to open (floating) → 1-port series element
+            open_s = np.ones((nf, 1, 1), dtype=complex)
+            open_net = rf.Network(frequency=freq, s=open_s)
+            return connect(comp, 1, open_net, 0)
 
         else:
             # Unknown: treat as open
