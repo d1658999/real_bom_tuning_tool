@@ -209,15 +209,16 @@ class PortConfigPanel(QWidget):
         def _update_count():
             n_ind = n_cap = 0
             if show_ind:
-                lo = sb_ind_min.value()
-                hi = sb_ind_max.value()
+                # Round to 2 dp to match setDecimals(2); Qt can return e.g. 0.5999 for 0.60
+                lo = round(sb_ind_min.value(), 2)
+                hi = round(sb_ind_max.value(), 2)
                 n_ind = sum(1 for i in _inductors()
-                            if lo <= i.get('value_nH', 0.0) <= hi)
+                            if lo <= round(i.get('value_nH', 0.0), 2) <= hi)
             if show_cap:
-                lo = sb_cap_min.value()
-                hi = sb_cap_max.value()
+                lo = round(sb_cap_min.value(), 2)
+                hi = round(sb_cap_max.value(), 2)
                 n_cap = sum(1 for c in _capacitors()
-                            if lo <= c.get('value_pF', 0.0) <= hi)
+                            if lo <= round(c.get('value_pF', 0.0), 2) <= hi)
             parts = []
             if show_ind:
                 parts.append(f"{n_ind} ind")
@@ -229,16 +230,17 @@ class PortConfigPanel(QWidget):
             # clamp: min ≤ max
             if sb_ind_min.value() > sb_ind_max.value():
                 sb_ind_max.setValue(sb_ind_min.value())
-            pc.ind_min_nh = sb_ind_min.value()
-            pc.ind_max_nh = sb_ind_max.value()
+            # Round to 2 dp so stored limits are clean and consistent with display
+            pc.ind_min_nh = round(sb_ind_min.value(), 2)
+            pc.ind_max_nh = round(sb_ind_max.value(), 2)
             _update_count()
             self.config_changed.emit()
 
         def _on_cap_changed():
             if sb_cap_min.value() > sb_cap_max.value():
                 sb_cap_max.setValue(sb_cap_min.value())
-            pc.cap_min_pf = sb_cap_min.value()
-            pc.cap_max_pf = sb_cap_max.value()
+            pc.cap_min_pf = round(sb_cap_min.value(), 2)
+            pc.cap_max_pf = round(sb_cap_max.value(), 2)
             _update_count()
             self.config_changed.emit()
 

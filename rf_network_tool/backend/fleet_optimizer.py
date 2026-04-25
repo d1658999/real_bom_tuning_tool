@@ -254,15 +254,21 @@ class FleetOptimizer:
         ind_min_nh: float = 0.0, ind_max_nh: float = 10000.0,
         cap_min_pf: float = 0.0, cap_max_pf: float = 10000.0,
     ) -> List[dict]:
-        """Get list of component candidates for a given type, filtered by value range."""
+        """Get list of component candidates for a given type, filtered by value range.
+
+        Limits from PortConfig are already rounded to 2 dp by the GUI spinboxes.
+        A small EPS (1e-6) is added to the upper bound to absorb any residual
+        floating-point imprecision so that exact boundary values are always included.
+        """
+        EPS = 1e-6  # < smallest meaningful component step (0.1 nH / 0.1 pF)
 
         def _ind_ok(i: dict) -> bool:
             v = i.get('value_nH', 0.0)
-            return ind_min_nh <= v <= ind_max_nh
+            return (ind_min_nh - EPS) <= v <= (ind_max_nh + EPS)
 
         def _cap_ok(c: dict) -> bool:
             v = c.get('value_pF', 0.0)
-            return cap_min_pf <= v <= cap_max_pf
+            return (cap_min_pf - EPS) <= v <= (cap_max_pf + EPS)
 
         if term_type == 'capacitor':
             return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor', 'value_pF': c.get('value_pF', 0.0)}
