@@ -203,17 +203,17 @@ class MainWindow(QMainWindow):
         self._update_run_button()
 
     def _update_run_button(self):
-        """Enable Run Cascade only when files loaded AND s1+s2 are defined."""
+        """Enable Run Cascade when files loaded AND at least s1+s2 are defined as consecutive signals."""
         has_files = bool(self.app_state.files)
-        s1_found = s2_found = False
+        signal_indices = set()
         for fc in self.app_state.files.values():
             for pc in fc.ports.values():
                 if pc.term_type == "signal":
-                    if pc.signal_index == 1:
-                        s1_found = True
-                    elif pc.signal_index == 2:
-                        s2_found = True
-        ready = has_files and s1_found and s2_found
+                    signal_indices.add(pc.signal_index)
+        # Need at minimum s1 and s2, and all present indices must be consecutive from 1
+        n = len(signal_indices)
+        consecutive = (n >= 2) and (signal_indices == set(range(1, n + 1)))
+        ready = has_files and consecutive
         self.run_cascade_action.setEnabled(ready)
         self.run_fleet_action.setEnabled(ready)
 

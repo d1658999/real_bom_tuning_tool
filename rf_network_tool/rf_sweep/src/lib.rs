@@ -47,33 +47,45 @@ fn apply_termination(
     result
 }
 
-/// Evaluate 2-port metrics from a flat (nfreq * 2 * 2) complex S-matrix.
-/// Returns (vswr_s11_max, vswr_s22_max, worst_il_db) over the eval freq range.
-fn compute_metrics(
-    s2: &[Complex64],
+/// Evaluate N-port metrics from a flat (nfreq * n * n) complex S-matrix.
+/// Antenna port = port index n-1 (last signal port).
+/// Returns:
+///   (vswr_non_ant_max, vswr_ant_max, worst_il_db)
+/// where:
+///   vswr_non_ant_max = max VSWR across ports 0..n-2 (all non-antenna signal ports)
+///   vswr_ant_max     = VSWR at port n-1 (antenna port)
+///   worst_il_db      = worst (most negative) insertion loss S[ant→signal] for any signal port
+fn compute_metrics_n(
+    s: &[Complex64],
     nfreq: usize,
+    n: usize,
     eval_start: usize,
     eval_stop: usize,
 ) -> (f64, f64, f64) {
-    let mut vswr_s11_max = 1.0_f64;
-    let mut vswr_s22_max = 1.0_f64;
+    let mut vswr_non_ant_max = 1.0_f64;
+    let mut vswr_ant_max = 1.0_f64;
     let mut worst_il_db = 0.0_f64;
+    let ant = n - 1;
 
     for f in eval_start..=eval_stop.min(nfreq - 1) {
-        // 2x2 layout: [s11, s12, s21, s22]
-        let s11_mag = s2[f * 4].norm().min(0.99999);
-        let s22_mag = s2[f * 4 + 3].norm().min(0.99999);
-        let s21_mag = s2[f * 4 + 2].norm().max(1e-15_f64);
+        // VSWR at antenna port
+        let s_ant_ant = s[f * n * n + ant * n + ant].norm().min(0.99999);
+        let v_ant = (1.0 + s_ant_ant) / (1.0 - s_ant_ant);
+        if v_ant > vswr_ant_max { vswr_ant_max = v_ant; }
 
-        let vswr11 = (1.0 + s11_mag) / (1.0 - s11_mag);
-        let vswr22 = (1.0 + s22_mag) / (1.0 - s22_mag);
-        let il_db  = 20.0 * s21_mag.log10();
+        // VSWR at non-antenna signal ports, and IL from antenna to each
+        for i in 0..ant {
+            let s_ii = s[f * n * n + i * n + i].norm().min(0.99999);
+            let v_i = (1.0 + s_ii) / (1.0 - s_ii);
+            if v_i > vswr_non_ant_max { vswr_non_ant_max = v_i; }
 
-        if vswr11 > vswr_s11_max { vswr_s11_max = vswr11; }
-        if vswr22 > vswr_s22_max { vswr_s22_max = vswr22; }
-        if il_db  < worst_il_db  { worst_il_db  = il_db; }
+            // S[ant, i]: transmission from signal port i to antenna port
+            let s_ant_i = s[f * n * n + ant * n + i].norm().max(1e-15_f64);
+            let il = 20.0 * s_ant_i.log10();
+            if il < worst_il_db { worst_il_db = il; }
+        }
     }
-    (vswr_s11_max, vswr_s22_max, worst_il_db)
+    (vswr_non_ant_max, vswr_ant_max, worst_il_db)
 }
 
 /// Build all combination index arrays for n_ports ports with counts[i] candidates each.
@@ -104,13 +116,15 @@ fn build_combos(counts: &[usize]) -> Vec<Vec<usize>> {
 ///                                Rows 1..n_cands = actual component gammas.
 /// * `eval_start_idx`            - first frequency index included in metric evaluation
 /// * `eval_stop_idx`             - last frequency index (inclusive) in metric evaluation
+/// * `n_signals`                 - number of signal ports (2, 3, or 4); tunable ports
+///                                start at index n_signals
 ///
 /// # Returns
 /// Tuple of four numpy arrays:
-/// * vswr_s11_max  : (n_combos,) float64
-/// * vswr_s22_max  : (n_combos,) float64
-/// * worst_il_db   : (n_combos,) float64
-/// * combo_indices : (n_combos, n_ports) int32  — which candidate row was used per port
+/// * vswr_non_ant_max : (n_combos,) float64 — max VSWR across non-antenna signal ports
+/// * vswr_ant_max     : (n_combos,) float64 — VSWR at antenna port (last signal port)
+/// * worst_il_db      : (n_combos,) float64
+/// * combo_indices    : (n_combos, n_tunable) int32 — which candidate row was used per port
 #[pyfunction]
 fn sweep_terminations_parallel<'py>(
     py: Python<'py>,
@@ -120,6 +134,7 @@ fn sweep_terminations_parallel<'py>(
     term_gammas_im: Vec<PyReadonlyArray2<'py, f64>>,
     eval_start_idx: usize,
     eval_stop_idx: usize,
+    n_signals: usize,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,
     Bound<'py, PyArray1<f64>>,
@@ -134,7 +149,7 @@ fn sweep_terminations_parallel<'py>(
     let n_ports = shape[1]; // N (includes s1, s2, and all tunable ports)
 
     let n_tunable = term_gammas_re.len();
-    assert_eq!(n_tunable, n_ports - 2, "Expected N-2 tunable ports");
+    assert_eq!(n_tunable, n_ports - n_signals, "Expected n_ports - n_signals tunable ports");
 
     // Convert base S-matrix to flat Vec<Complex64>
     let base_s: Vec<Complex64> = (0..nfreq)
@@ -179,37 +194,36 @@ fn sweep_terminations_parallel<'py>(
             let mut s = base_s.clone();
             let mut current_n = n_ports;
 
-            // Always terminate port 2 (first tunable port) at each step.
-            // Port ordering: [s1=0, s2=1, t0=2, t1=3, ...] → after terminating
-            // t0 (port 2): [s1=0, s2=1, t1=2, ...] → terminate t1 (now port 2) → ...
+            // Tunable ports start at index n_signals; after each termination the next
+            // tunable port shifts down to n_signals again as previous ports are eliminated.
             for (p, &cand_idx) in combo_indices.iter().enumerate() {
                 let gamma = &all_gammas[p][cand_idx];
-                s = apply_termination(&s, current_n, nfreq, 2, gamma);
+                s = apply_termination(&s, current_n, nfreq, n_signals, gamma);
                 current_n -= 1;
             }
 
-            // s is now (nfreq * 2 * 2)
-            compute_metrics(&s, nfreq, eval_start_idx, eval_stop_idx)
+            // s is now (nfreq * n_signals * n_signals)
+            compute_metrics_n(&s, nfreq, n_signals, eval_start_idx, eval_stop_idx)
         })
         .collect();
 
     // Unpack results into separate arrays
-    let mut vswr_s11 = Vec::with_capacity(n_combos);
-    let mut vswr_s22 = Vec::with_capacity(n_combos);
+    let mut vswr_non_ant = Vec::with_capacity(n_combos);
+    let mut vswr_ant = Vec::with_capacity(n_combos);
     let mut worst_il = Vec::with_capacity(n_combos);
     let mut combo_idx_flat: Vec<i32> = Vec::with_capacity(n_combos * n_tunable);
 
-    for (i, (v11, v22, il)) in results.iter().enumerate() {
-        vswr_s11.push(*v11);
-        vswr_s22.push(*v22);
+    for (i, (v_non_ant, v_ant, il)) in results.iter().enumerate() {
+        vswr_non_ant.push(*v_non_ant);
+        vswr_ant.push(*v_ant);
         worst_il.push(*il);
         for &ci in &combos[i] {
             combo_idx_flat.push(ci as i32);
         }
     }
 
-    let vswr_s11_arr = PyArray1::from_vec_bound(py, vswr_s11);
-    let vswr_s22_arr = PyArray1::from_vec_bound(py, vswr_s22);
+    let vswr_s11_arr = PyArray1::from_vec_bound(py, vswr_non_ant);
+    let vswr_s22_arr = PyArray1::from_vec_bound(py, vswr_ant);
     let worst_il_arr = PyArray1::from_vec_bound(py, worst_il);
 
     use numpy::ndarray::Array2;

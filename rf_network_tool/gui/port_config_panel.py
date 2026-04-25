@@ -412,7 +412,7 @@ class PortConfigPanel(QWidget):
 
         elif term == "signal":
             combo = QComboBox()
-            combo.addItems(["s1", "s2"])
+            combo.addItems(["s1", "s2", "s3", "s4"])
             combo.setCurrentIndex(max(0, (pc.signal_index or 1) - 1))
             combo.currentIndexChanged.connect(
                 lambda idx, fid=file_id, pn=port_num:

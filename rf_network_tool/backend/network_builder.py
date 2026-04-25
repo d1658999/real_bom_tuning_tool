@@ -1,7 +1,7 @@
 """
 RF Network cascade builder.
 Loads multiple .snp Touchstone files, connects ports between networks,
-applies terminations (open/short/capacitor/inductor), and returns a 2-port network.
+applies terminations (open/short/capacitor/inductor), and returns an N-port network.
 
 Uses scikit-rf (skrf) for all S-parameter operations.
 
@@ -11,7 +11,7 @@ Algorithm:
 3. Track port mapping: (network_id, 1-based port) -> 0-based global port index
 4. Apply inter-network connections using rf.innerconnect
 5. Apply terminations (open/short/component) using rf.connect with 1-port networks
-6. Result is a 2-port network between the marked s1 and s2 ports
+6. Result is an N-port network between the marked s1..sN signal ports (N >= 2)
 
 Port termination models (all as SHUNT elements - component between port and ground):
   - open:      S11 = +1 (perfect open, no loading)
@@ -56,7 +56,7 @@ class NetworkConfig:
 
 
 class NetworkBuilder:
-    """Builds a final 2-port S-parameter network from a NetworkConfig."""
+    """Builds a final N-port S-parameter network from a NetworkConfig (N >= 2)."""
 
     def __init__(self, config: NetworkConfig):
         self.config = config
@@ -113,23 +113,33 @@ class NetworkBuilder:
                 super_net = connect(super_net, k, term_net, 0)
                 port_map = self._update_port_map_connect(port_map, k, (nid, port))
 
-        # 7. Reorder to [s1, s2] and return
-        if not signal_ports.get(1) or not signal_ports.get(2):
-            raise ValueError("Must define exactly one s1 and one s2 signal port")
-
-        k1 = port_map[signal_ports[1]]
-        k2 = port_map[signal_ports[2]]
-
-        if super_net.nports != 2:
+        # 7. Validate signal ports are consecutive 1..N and reorder to [s1, s2, ..., sN]
+        if not signal_ports:
+            raise ValueError("No signal ports defined. At least s1 and s2 are required.")
+        n_signals = max(signal_ports.keys())
+        expected = set(range(1, n_signals + 1))
+        if set(signal_ports.keys()) != expected:
             raise ValueError(
-                f"After all terminations, expected 2 ports but got {super_net.nports}. "
+                f"Signal port indices must be consecutive starting from 1. "
+                f"Got indices: {sorted(signal_ports.keys())}"
+            )
+        if n_signals < 2:
+            raise ValueError("At least two signal ports (s1, s2) are required.")
+
+        # Build ordered port indices: [s1_idx, s2_idx, ..., sN_idx]
+        ordered_ks = [port_map[signal_ports[i]] for i in range(1, n_signals + 1)]
+
+        if super_net.nports != n_signals:
+            raise ValueError(
+                f"After all terminations, expected {n_signals} ports but got {super_net.nports}. "
                 "Ensure all non-signal ports are terminated."
             )
 
-        # Reorder ports if needed so port 0 = s1, port 1 = s2
+        # Reorder ports if needed so port 0=s1, port 1=s2, ..., port N-1=sN
         # NOTE: skrf renumber() is in-place and returns None — do NOT reassign
-        if k1 != 0 or k2 != 1:
-            super_net.renumber([k1, k2], [0, 1])
+        target = list(range(n_signals))
+        if ordered_ks != target:
+            super_net.renumber(ordered_ks, target)
 
         return super_net
 
@@ -244,7 +254,7 @@ class NetworkBuilder:
 
 
 def build_network_from_config(config: NetworkConfig) -> rf.Network:
-    """Convenience function: build and return 2-port network from config."""
+    """Convenience function: build and return N-port network from config."""
     builder = NetworkBuilder(config)
     return builder.build()
 
@@ -258,11 +268,11 @@ def build_base_network_for_fleet(
 
     Like build() but:
     - Does NOT terminate tunable ports (leaves them as open ports in the network)
-    - Reorders remaining ports to: [s1=0, s2=1, t0=2, t1=3, ..., tk=N-1]
+    - Reorders remaining ports to: [s1=0, s2=1, ..., sN=N-1, t0=N, t1=N+1, ..., tk=N+k]
 
     Returns:
         (net, ordered_port_keys)
-        net: rf.Network with ports [s1, s2, t0, t1, ..., tk]
+        net: rf.Network with ports [s1, s2, ..., sN, t0, t1, ..., tk]
         ordered_port_keys: [(nid, pnum), ...] matching net port indices
     """
     builder = NetworkBuilder(config)
@@ -320,17 +330,24 @@ def build_base_network_for_fleet(
             super_net = connect(super_net, k, term_net, 0)
             port_map = builder._update_port_map_connect(port_map, k, (nid, port))
 
-    # Reorder: [s1, s2, t0, t1, ..., tk]
-    if not signal_ports.get(1) or not signal_ports.get(2):
-        raise ValueError("Must define s1 and s2 signal ports")
+    # Reorder: [s1, s2, ..., sN, t0, t1, ..., tk]
+    if not signal_ports:
+        raise ValueError("No signal ports defined. At least s1 and s2 are required.")
+    n_signals = max(signal_ports.keys())
+    expected = set(range(1, n_signals + 1))
+    if set(signal_ports.keys()) != expected:
+        raise ValueError(
+            f"Signal port indices must be consecutive starting from 1. "
+            f"Got indices: {sorted(signal_ports.keys())}"
+        )
+    if n_signals < 2:
+        raise ValueError("At least two signal ports (s1, s2) are required.")
 
-    k1 = port_map[signal_ports[1]]  # s1 current index
-    k2 = port_map[signal_ports[2]]  # s2 current index
-
+    signal_indices = [port_map[signal_ports[i]] for i in range(1, n_signals + 1)]
     tunable_indices = [port_map[tuple(k)] for k in tunable_port_keys
                        if tuple(k) in port_map]
 
-    desired_order = [k1, k2] + tunable_indices
+    desired_order = signal_indices + tunable_indices
     to_ports = list(range(len(desired_order)))
 
     if len(desired_order) != super_net.nports:
@@ -343,8 +360,8 @@ def build_base_network_for_fleet(
     # NOTE: skrf renumber() is in-place and returns None — do NOT reassign
     super_net.renumber(desired_order, to_ports)
 
-    # Build ordered_port_keys: [signal_1_key, signal_2_key, t0_key, ...]
-    ordered_port_keys = [signal_ports[1], signal_ports[2]] + [
+    # Build ordered_port_keys: [s1_key, s2_key, ..., sN_key, t0_key, ...]
+    ordered_port_keys = [signal_ports[i] for i in range(1, n_signals + 1)] + [
         tuple(k) for k in tunable_port_keys if tuple(k) in port_map
     ]
 

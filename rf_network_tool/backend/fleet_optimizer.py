@@ -67,6 +67,14 @@ class AgentResult:
     s11_im: List[float] = field(default_factory=list)
     s22_re: List[float] = field(default_factory=list)
     s22_im: List[float] = field(default_factory=list)
+    # N-port generalised fields (N >= 2).  For N=2 these mirror the scalar fields above.
+    # sii_mag_list[i] = |S_{i+1,i+1}| magnitude array for port i (0-indexed)
+    # sij_db_list[i]  = IL dB array for S_{ant, i}   (antenna→signal port i)
+    # sii_re_list[i]  = Re(S_{i+1,i+1}) array;  sii_im_list[i] = Im(...)
+    sii_mag_list: List[List[float]] = field(default_factory=list)
+    sij_db_list:  List[List[float]] = field(default_factory=list)
+    sii_re_list:  List[List[float]] = field(default_factory=list)
+    sii_im_list:  List[List[float]] = field(default_factory=list)
 
 
 @dataclass
@@ -129,38 +137,76 @@ def _build_config_with_assignments(
 
 def _evaluate_network(net: rf.Network, freq_start: float, freq_stop: float) -> dict:
     """
-    Evaluate a 2-port network: VSWR S11/S22, IL S21, in freq range.
-    Returns dict with scalar metrics.
+    Evaluate an N-port network in the frequency range.
+
+    Convention: antenna port = last port (index N-1).
+    Returns a dict with composite scalars and per-port detail lists.
+
+    Composite scalars (preserved for agent ranking logic):
+      vswr_s11_max  — max VSWR across all NON-antenna signal ports (0..N-2)
+      vswr_s22_max  — VSWR at antenna port (N-1)
+      worst_il_db   — worst (most negative dB) IL from antenna to any signal port
+
+    Legacy 2-port keys (s11_mag, s22_mag, s21_db, s11_re/im, s22_re/im) are
+    populated from port 0 and the antenna port for backward compat with N=2.
     """
     f_ghz = net.frequency.f / 1e9
     mask = (f_ghz >= freq_start) & (f_ghz <= freq_stop)
-
-    s11 = net.s[mask, 0, 0]
-    s22 = net.s[mask, 1, 1]
-    s21 = net.s[mask, 1, 0]
+    n = net.nports
+    ant = n - 1  # antenna port index
 
     def vswr(s):
-        mag = np.abs(s)
-        mag = np.clip(mag, 0, 0.9999)
+        mag = np.clip(np.abs(s), 0, 0.9999)
         return (1 + mag) / (1 - mag)
 
-    vswr_s11 = vswr(s11)
-    vswr_s22 = vswr(s22)
-    il_db = 20 * np.log10(np.abs(s21) + 1e-15)
+    # Per-port Sii reflection and VSWR
+    sii_mag_list = []
+    sii_re_list  = []
+    sii_im_list  = []
+    vswr_per_port = []
+    for i in range(n):
+        s_ii = net.s[mask, i, i]
+        sii_mag_list.append(np.abs(s_ii).tolist())
+        sii_re_list.append(np.real(s_ii).tolist())
+        sii_im_list.append(np.imag(s_ii).tolist())
+        vswr_per_port.append(vswr(s_ii))
+
+    # IL from antenna to each non-antenna signal port
+    sij_db_list = []
+    worst_il_db = 0.0
+    for i in range(ant):  # signal ports 0..ant-1
+        s_ant_i = net.s[mask, ant, i]
+        il_db = 20 * np.log10(np.abs(s_ant_i) + 1e-15)
+        sij_db_list.append(il_db.tolist())
+        worst_il_db = min(worst_il_db, float(np.min(il_db)))
+
+    # Composite VSWR metrics
+    vswr_s11_max = float(max(np.max(vswr_per_port[i]) for i in range(ant))) if ant > 0 else 1.0
+    vswr_s22_max = float(np.max(vswr_per_port[ant]))
+
+    # Legacy 2-port keys: port 0 and antenna
+    s11_legacy = net.s[mask, 0, 0]
+    s_ant_0    = net.s[mask, ant, 0]
+    il_legacy  = 20 * np.log10(np.abs(s_ant_0) + 1e-15)
 
     return {
-        'vswr_s11_max': float(np.max(vswr_s11)),
-        'vswr_s22_max': float(np.max(vswr_s22)),
-        'worst_il_db': float(np.min(il_db)),   # most negative = worst
+        'vswr_s11_max': vswr_s11_max,
+        'vswr_s22_max': vswr_s22_max,
+        'worst_il_db':  worst_il_db,
         'freq_ghz': f_ghz[mask].tolist(),
-        's11_mag': np.abs(s11).tolist(),
-        's22_mag': np.abs(s22).tolist(),
-        's21_db': il_db.tolist(),
-        # Complex S-params for Smith chart plotting (real/imag split)
-        's11_re': np.real(s11).tolist(),
-        's11_im': np.imag(s11).tolist(),
-        's22_re': np.real(s22).tolist(),
-        's22_im': np.imag(s22).tolist(),
+        # Legacy fields (port 0 + antenna) for 2-port compat
+        's11_mag': np.abs(s11_legacy).tolist(),
+        's22_mag': sii_mag_list[ant],
+        's21_db':  il_legacy.tolist(),
+        's11_re':  np.real(s11_legacy).tolist(),
+        's11_im':  np.imag(s11_legacy).tolist(),
+        's22_re':  sii_re_list[ant],
+        's22_im':  sii_im_list[ant],
+        # N-port generalised fields
+        'sii_mag_list': sii_mag_list,
+        'sij_db_list':  sij_db_list,
+        'sii_re_list':  sii_re_list,
+        'sii_im_list':  sii_im_list,
     }
 
 
@@ -409,6 +455,7 @@ class FleetOptimizer:
         # Call Rust
         self._log(f"  [Rust] Launching parallel sweep ({total:,} combinations)...")
         base_s = base_net.s  # (nfreq, N, N) complex128
+        n_signals = base_net.nports - len(tunable_ports)
 
         vswr_s11, vswr_s22, worst_il, combo_indices = rf_sweep.sweep_terminations_parallel(
             np.ascontiguousarray(base_s.real, dtype=np.float64),
@@ -417,6 +464,7 @@ class FleetOptimizer:
             [np.ascontiguousarray(g, dtype=np.float64) for g in term_gammas_im],
             eval_start,
             eval_stop,
+            n_signals,
         )
         self._log(f"  [Rust] Sweep complete: {len(vswr_s11):,} valid combinations")
 
@@ -466,16 +514,17 @@ class FleetOptimizer:
 
     def _smith_spread(self, net: rf.Network, freq_start: float, freq_stop: float) -> float:
         """
-        Compute Smith chart spread: std deviation of S11 and S22 real/imag parts.
-        Lower = tighter cluster near center.
+        Compute Smith chart spread across all signal ports.
+        Lower = tighter cluster near centre (better match).
         """
         f_ghz = net.frequency.f / 1e9
         mask = (f_ghz >= freq_start) & (f_ghz <= freq_stop)
-        s11 = net.s[mask, 0, 0]
-        s22 = net.s[mask, 1, 1]
-        pts = np.concatenate([s11, s22])
-        spread = np.std(np.real(pts))**2 + np.std(np.imag(pts))**2 + \
-                 np.mean(np.abs(pts))**2  # penalize distance from center
+        parts = []
+        for i in range(net.nports):
+            parts.append(net.s[mask, i, i])
+        pts = np.concatenate(parts)
+        spread = (np.std(np.real(pts))**2 + np.std(np.imag(pts))**2 +
+                  np.mean(np.abs(pts))**2)
         return float(spread)
 
     def _run_agent(self, agent_id: int, all_results: List[dict],
@@ -608,6 +657,10 @@ class FleetOptimizer:
             s11_im=best.get('s11_im', []),
             s22_re=best.get('s22_re', []),
             s22_im=best.get('s22_im', []),
+            sii_mag_list=best.get('sii_mag_list', []),
+            sij_db_list =best.get('sij_db_list',  []),
+            sii_re_list =best.get('sii_re_list',  []),
+            sii_im_list =best.get('sii_im_list',  []),
         )
 
     def _compute_risk_scores(self, agent_results: List[AgentResult]) -> Dict[str, float]:
@@ -650,56 +703,64 @@ class FleetOptimizer:
         fig, axes = plt.subplots(1, 3, figsize=(15, 4))
         fig.suptitle(f"{result.agent_name}\nRisk Score: {result.risk_score:.3f}", fontsize=11)
 
+        COLORS = ['blue', 'red', 'green', 'darkorange']
         freq = np.array(result.freq_ghz)
-        s11 = np.array(result.s11_mag)
-        s22 = np.array(result.s22_mag)
+        n_ports = len(result.sii_mag_list) if result.sii_mag_list else 2
+        ant = n_ports - 1
 
-        # Smith chart — plot actual S11/S22 locus using complex values
+        # Smith chart
         ax = axes[0]
         ax.set_aspect('equal')
-        ax.set_xlim(-1.1, 1.1)
-        ax.set_ylim(-1.1, 1.1)
+        ax.set_xlim(-1.1, 1.1); ax.set_ylim(-1.1, 1.1)
         theta = np.linspace(0, 2*np.pi, 360)
         ax.plot(np.cos(theta), np.sin(theta), 'k-', lw=0.5)
-        ax.axhline(0, color='k', lw=0.3)
-        ax.axvline(0, color='k', lw=0.3)
+        ax.axhline(0, color='k', lw=0.3); ax.axvline(0, color='k', lw=0.3)
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=0.8, label='VSWR=2')
-        # Plot actual S11/S22 locus
-        if result.s11_re:
-            s11_re = np.array(result.s11_re)
-            s11_im = np.array(result.s11_im)
-            ax.plot(s11_re, s11_im, 'b-', lw=1.5, label='S11')
-        if result.s22_re:
-            s22_re = np.array(result.s22_re)
-            s22_im = np.array(result.s22_im)
-            ax.plot(s22_re, s22_im, 'r-', lw=1.5, label='S22')
-        ax.set_title('Smith Chart')
-        ax.set_xlabel('Re(Γ)')
-        ax.legend(fontsize=7)
+        if result.sii_re_list:
+            for i, (re_vals, im_vals) in enumerate(zip(result.sii_re_list, result.sii_im_list)):
+                tag = " ANT" if i == ant else ""
+                ax.plot(re_vals, im_vals, color=COLORS[i % len(COLORS)], lw=1.5,
+                        label=f'S{i+1}{i+1}{tag}')
+        else:
+            # Fallback legacy fields
+            if result.s11_re:
+                ax.plot(result.s11_re, result.s11_im, 'b-', lw=1.5, label='S11')
+            if result.s22_re:
+                ax.plot(result.s22_re, result.s22_im, 'r-', lw=1.5, label='S22')
+        ax.set_title('Smith Chart'); ax.set_xlabel('Re(Γ)'); ax.legend(fontsize=7)
 
         # VSWR
         ax = axes[1]
-        vswr_s11 = (1 + s11) / (1 - np.clip(s11, 0, 0.9999))
-        vswr_s22 = (1 + s22) / (1 - np.clip(s22, 0, 0.9999))
-        ax.plot(freq, vswr_s11, 'b-', label=f'VSWR S11 (max={result.vswr_s11_max:.2f})')
-        ax.plot(freq, vswr_s22, 'r-', label=f'VSWR S22 (max={result.vswr_s22_max:.2f})')
+        if result.sii_mag_list:
+            for i, mag in enumerate(result.sii_mag_list):
+                s_arr = np.clip(np.array(mag), 0, 0.9999)
+                vswr_i = (1 + s_arr) / (1 - s_arr)
+                tag = " ANT" if i == ant else ""
+                lbl = f'VSWR S{i+1}{i+1}{tag}'
+                ax.plot(freq, vswr_i, color=COLORS[i % len(COLORS)], label=lbl)
+        else:
+            s11 = np.array(result.s11_mag); s22 = np.array(result.s22_mag)
+            ax.plot(freq, (1+s11)/(1-np.clip(s11,0,0.9999)), 'b-',
+                    label=f'VSWR S11 (max={result.vswr_s11_max:.2f})')
+            ax.plot(freq, (1+s22)/(1-np.clip(s22,0,0.9999)), 'r-',
+                    label=f'VSWR S22 (max={result.vswr_s22_max:.2f})')
         ax.axhline(1.4, color='g', linestyle='--', lw=0.8, label='VSWR=1.4')
         ax.axhline(2.0, color='orange', linestyle='--', lw=0.8, label='VSWR=2.0')
-        ax.set_xlabel('Frequency (GHz)')
-        ax.set_ylabel('VSWR')
-        ax.set_title('VSWR')
-        ax.legend(fontsize=7)
-        ax.grid(True, alpha=0.3)
+        ax.set_xlabel('Frequency (GHz)'); ax.set_ylabel('VSWR'); ax.set_title('VSWR')
+        ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 
-        # Insertion Loss
+        # IL
         ax = axes[2]
-        ax.plot(freq, result.s21_db, 'g-', label=f'IL (worst={result.worst_il_db:.2f}dB)')
-        ax.set_xlabel('Frequency (GHz)')
-        ax.set_ylabel('S21 (dB)')
-        ax.set_title('Insertion Loss')
-        ax.legend(fontsize=7)
-        ax.grid(True, alpha=0.3)
+        if result.sij_db_list:
+            for i, il in enumerate(result.sij_db_list):
+                ax.plot(freq, il, color=COLORS[i % len(COLORS)],
+                        label=f'S{ant+1}{i+1} IL')
+        else:
+            ax.plot(freq, result.s21_db, 'g-',
+                    label=f'IL (worst={result.worst_il_db:.2f}dB)')
+        ax.set_xlabel('Frequency (GHz)'); ax.set_ylabel('dB')
+        ax.set_title('Insertion Loss'); ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
         fname = output_dir / f"agent_{result.agent_id}_{result.agent_name.replace(' ', '_').replace('-', '')}.png"
@@ -746,12 +807,13 @@ class FleetOptimizer:
             fontsize=10
         )
 
+        COLORS = ['blue', 'red', 'green', 'darkorange']
         freq = np.array(winner.freq_ghz)
-        s11 = np.array(winner.s11_mag)
-        s22 = np.array(winner.s22_mag)
+        n_ports = len(winner.sii_mag_list) if winner.sii_mag_list else 2
+        ant = n_ports - 1
         theta = np.linspace(0, 2*np.pi, 360)
 
-        # Smith — plot actual S11/S22 locus using complex values
+        # Smith — plot actual Sii locus for all ports
         ax = axes[0]
         ax.set_aspect('equal')
         ax.set_xlim(-1.1, 1.1)
@@ -761,21 +823,35 @@ class FleetOptimizer:
         ax.axvline(0, color='k', lw=0.3)
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=1.2, label='VSWR=2')
-        # Plot actual S11/S22 locus
-        if winner.s11_re:
-            ax.plot(np.array(winner.s11_re), np.array(winner.s11_im), 'b-', lw=2, label='S11')
-        if winner.s22_re:
-            ax.plot(np.array(winner.s22_re), np.array(winner.s22_im), 'r-', lw=2, label='S22')
+        if winner.sii_re_list:
+            for i, (re_vals, im_vals) in enumerate(zip(winner.sii_re_list, winner.sii_im_list)):
+                tag = " ANT" if i == ant else ""
+                ax.plot(re_vals, im_vals, color=COLORS[i % len(COLORS)], lw=2,
+                        label=f'S{i+1}{i+1}{tag}')
+        else:
+            if winner.s11_re:
+                ax.plot(np.array(winner.s11_re), np.array(winner.s11_im), 'b-', lw=2, label='S11')
+            if winner.s22_re:
+                ax.plot(np.array(winner.s22_re), np.array(winner.s22_im), 'r-', lw=2, label='S22')
         ax.set_title('Smith Chart (Final)')
         ax.set_xlabel('Re(Γ)')
         ax.legend(fontsize=8)
 
         # VSWR
         ax = axes[1]
-        vswr_s11 = (1 + s11) / (1 - np.clip(s11, 0, 0.9999))
-        vswr_s22 = (1 + s22) / (1 - np.clip(s22, 0, 0.9999))
-        ax.plot(freq, vswr_s11, 'b-', label=f'VSWR S11 (max={winner.vswr_s11_max:.2f})')
-        ax.plot(freq, vswr_s22, 'r-', label=f'VSWR S22 (max={winner.vswr_s22_max:.2f})')
+        if winner.sii_mag_list:
+            for i, mag in enumerate(winner.sii_mag_list):
+                s_arr = np.clip(np.array(mag), 0, 0.9999)
+                vswr_i = (1 + s_arr) / (1 - s_arr)
+                tag = " ANT" if i == ant else ""
+                ax.plot(freq, vswr_i, color=COLORS[i % len(COLORS)],
+                        label=f'VSWR S{i+1}{i+1}{tag}')
+        else:
+            s11 = np.array(winner.s11_mag); s22 = np.array(winner.s22_mag)
+            ax.plot(freq, (1+s11)/(1-np.clip(s11,0,0.9999)), 'b-',
+                    label=f'VSWR S11 (max={winner.vswr_s11_max:.2f})')
+            ax.plot(freq, (1+s22)/(1-np.clip(s22,0,0.9999)), 'r-',
+                    label=f'VSWR S22 (max={winner.vswr_s22_max:.2f})')
         ax.axhline(1.4, color='g', linestyle='--', lw=1, label='VSWR=1.4')
         ax.axhline(2.0, color='orange', linestyle='--', lw=1, label='VSWR=2.0')
         ax.set_xlabel('Frequency (GHz)')
@@ -786,9 +862,15 @@ class FleetOptimizer:
 
         # IL
         ax = axes[2]
-        ax.plot(freq, winner.s21_db, 'g-', label=f'IL (worst={winner.worst_il_db:.2f}dB)')
+        if winner.sij_db_list:
+            for i, il in enumerate(winner.sij_db_list):
+                ax.plot(freq, il, color=COLORS[i % len(COLORS)],
+                        label=f'S{ant+1}{i+1} IL')
+        else:
+            ax.plot(freq, winner.s21_db, 'g-',
+                    label=f'IL (worst={winner.worst_il_db:.2f}dB)')
         ax.set_xlabel('Frequency (GHz)')
-        ax.set_ylabel('S21 (dB)')
+        ax.set_ylabel('dB')
         ax.set_title('Insertion Loss (Final)')
         ax.legend()
         ax.grid(True, alpha=0.3)
