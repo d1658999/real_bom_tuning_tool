@@ -178,24 +178,117 @@ class PortConfigPanel(QWidget):
         widget = self._build_component_widget(term, file_id, port_num, pc)
         table.setCellWidget(row, 3, widget)
 
+    # ------------------------------------------------------------------
+    # Range-limit widget for fleet sweep ports
+    # ------------------------------------------------------------------
+
+    def _build_range_widget(self, file_id: str, port_num: int, pc: PortConfig,
+                             show_ind: bool, show_cap: bool) -> QWidget:
+        """
+        Compact widget with QDoubleSpinBox min/max limits and a live count label.
+        Shown for open/ind, open/cap, and open/ind/cap termination types.
+        """
+        container = QWidget()
+        h = QHBoxLayout(container)
+        h.setContentsMargins(2, 0, 2, 0)
+        h.setSpacing(4)
+
+        count_label = QLabel()
+        count_label.setStyleSheet("color: #0066cc; font-style: italic; font-size: 10px;")
+
+        def _spin(value: float, suffix: str, decimals: int = 2, step: float = 0.1) -> QDoubleSpinBox:
+            sb = QDoubleSpinBox()
+            sb.setRange(0.0, 99999.0)
+            sb.setDecimals(decimals)
+            sb.setSingleStep(step)
+            sb.setSuffix(suffix)
+            sb.setValue(value)
+            sb.setFixedWidth(90)
+            return sb
+
+        def _update_count():
+            n_ind = n_cap = 0
+            if show_ind:
+                lo = sb_ind_min.value()
+                hi = sb_ind_max.value()
+                n_ind = sum(1 for i in _inductors()
+                            if lo <= i.get('value_nH', 0.0) <= hi)
+            if show_cap:
+                lo = sb_cap_min.value()
+                hi = sb_cap_max.value()
+                n_cap = sum(1 for c in _capacitors()
+                            if lo <= c.get('value_pF', 0.0) <= hi)
+            parts = []
+            if show_ind:
+                parts.append(f"{n_ind} ind")
+            if show_cap:
+                parts.append(f"{n_cap} cap")
+            count_label.setText(f"🔍 open + {' + '.join(parts)}")
+
+        def _on_ind_changed():
+            # clamp: min ≤ max
+            if sb_ind_min.value() > sb_ind_max.value():
+                sb_ind_max.setValue(sb_ind_min.value())
+            pc.ind_min_nh = sb_ind_min.value()
+            pc.ind_max_nh = sb_ind_max.value()
+            _update_count()
+            self.config_changed.emit()
+
+        def _on_cap_changed():
+            if sb_cap_min.value() > sb_cap_max.value():
+                sb_cap_max.setValue(sb_cap_min.value())
+            pc.cap_min_pf = sb_cap_min.value()
+            pc.cap_max_pf = sb_cap_max.value()
+            _update_count()
+            self.config_changed.emit()
+
+        if show_ind:
+            h.addWidget(QLabel("ind:"))
+            sb_ind_min = _spin(pc.ind_min_nh, " nH")
+            sb_ind_max = _spin(pc.ind_max_nh, " nH")
+            h.addWidget(sb_ind_min)
+            h.addWidget(QLabel("–"))
+            h.addWidget(sb_ind_max)
+            sb_ind_min.valueChanged.connect(lambda _: _on_ind_changed())
+            sb_ind_max.valueChanged.connect(lambda _: _on_ind_changed())
+        else:
+            sb_ind_min = sb_ind_max = None  # type: ignore[assignment]
+
+        if show_cap:
+            if show_ind:
+                sep = QLabel("|")
+                sep.setStyleSheet("color: #aaa;")
+                h.addWidget(sep)
+            h.addWidget(QLabel("cap:"))
+            sb_cap_min = _spin(pc.cap_min_pf, " pF")
+            sb_cap_max = _spin(pc.cap_max_pf, " pF")
+            h.addWidget(sb_cap_min)
+            h.addWidget(QLabel("–"))
+            h.addWidget(sb_cap_max)
+            sb_cap_min.valueChanged.connect(lambda _: _on_cap_changed())
+            sb_cap_max.valueChanged.connect(lambda _: _on_cap_changed())
+        else:
+            sb_cap_min = sb_cap_max = None  # type: ignore[assignment]
+
+        h.addWidget(count_label, stretch=1)
+        _update_count()
+        return container
+
     def _build_component_widget(self, term: str, file_id: str, port_num: int, pc: PortConfig) -> QWidget:
         if term in ("open", "short"):
             return QLabel("")
 
         elif term == "open/ind":
-            label = QLabel("🔍 Fleet sweeps: open + all inductors")
-            label.setStyleSheet("color: #0066cc; font-style: italic;")
-            return label
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=True, show_cap=False)
 
         elif term == "open/cap":
-            label = QLabel("🔍 Fleet sweeps: open + all capacitors")
-            label.setStyleSheet("color: #0066cc; font-style: italic;")
-            return label
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=False, show_cap=True)
 
         elif term == "open/ind/cap":
-            label = QLabel("🔍 Fleet sweeps: open + all inductors + all capacitors")
-            label.setStyleSheet("color: #0066cc; font-style: italic;")
-            return label
+            return self._build_range_widget(file_id, port_num, pc,
+                                            show_ind=True, show_cap=True)
 
         elif term == "capacitor":
             caps = _capacitors()

@@ -322,6 +322,10 @@ class MainWindow(QMainWindow):
                     "connect_to_file": pc.connect_to_file,
                     "connect_to_port": pc.connect_to_port,
                     "signal_index":   pc.signal_index,
+                    "ind_min_nh":     pc.ind_min_nh,
+                    "ind_max_nh":     pc.ind_max_nh,
+                    "cap_min_pf":     pc.cap_min_pf,
+                    "cap_max_pf":     pc.cap_max_pf,
                 }
             data["files"][file_id] = {
                 "file_path":    fc.file_path,
@@ -365,6 +369,10 @@ class MainWindow(QMainWindow):
                     connect_to_file= pd.get("connect_to_file", ""),
                     connect_to_port= pd.get("connect_to_port", 1),
                     signal_index   = pd.get("signal_index", 1),
+                    ind_min_nh     = pd.get("ind_min_nh", 0.0),
+                    ind_max_nh     = pd.get("ind_max_nh", 10000.0),
+                    cap_min_pf     = pd.get("cap_min_pf", 0.0),
+                    cap_max_pf     = pd.get("cap_max_pf", 10000.0),
                 )
             self.app_state.files[file_id] = FileConfig(
                 file_id      = file_id,

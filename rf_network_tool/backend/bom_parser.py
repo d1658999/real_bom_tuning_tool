@@ -31,6 +31,23 @@ def _parse_cap_value(code: str) -> str:
         return f"{val:.4g}pF"
     return code + "pF"
 
+
+def _parse_cap_value_pf(code: str) -> float:
+    """Return capacitor value as a float in pF; returns 0.0 if unparseable."""
+    code = code.upper()
+    try:
+        if 'R' in code:
+            parts = code.split('R')
+            left = parts[0] if parts[0] else '0'
+            right = parts[1] if len(parts) > 1 else '0'
+            return float(f"{left}.{right}")
+        elif len(code) == 3 and code.isdigit():
+            return float(int(code[:2]) * (10 ** int(code[2])))
+    except (ValueError, IndexError):
+        pass
+    return 0.0
+
+
 def _parse_ind_value(code: str) -> str:
     """
     Parse inductor value from code portion (between TQ and H02/B02).
@@ -51,37 +68,54 @@ def _parse_ind_value(code: str) -> str:
         return f"{int(code)}nH"
     return code + "nH"
 
+
+def _parse_ind_value_nh(code: str) -> float:
+    """Return inductor value as a float in nH; returns 0.0 if unparseable."""
+    code = code.upper()
+    try:
+        if 'N' in code:
+            parts = code.split('N')
+            left = parts[0] if parts[0] else '0'
+            right = parts[1] if (len(parts) > 1 and parts[1]) else ''
+            return float(f"{left}.{right}") if right else float(left)
+        elif code.isdigit():
+            return float(int(code))
+    except (ValueError, IndexError):
+        pass
+    return 0.0
+
 def list_capacitors() -> list:
     """Return list of dicts: {name, path, display_name, value_pF}"""
     bom_dir = get_project_root() / "Capacitors_BOM"
     results = []
     for f in sorted(bom_dir.glob("*.s2p")):
         name = f.stem
-        # Extract value code: between 'C1E' and the tolerance/packaging suffix
-        # Pattern: GJM0225C1E{CODE}{SUFFIX}01
         m = re.search(r'C1E([0-9R]+)[A-Z]+01', name, re.IGNORECASE)
         if m:
             code = m.group(1).upper()
             display = f"{_parse_cap_value(code)} - {name}"
+            value_pf = _parse_cap_value_pf(code)
         else:
             display = name
-        results.append({"name": name, "path": str(f), "display_name": display})
+            value_pf = 0.0
+        results.append({"name": name, "path": str(f), "display_name": display, "value_pF": value_pf})
     return results
 
 def list_inductors() -> list:
-    """Return list of dicts: {name, path, display_name}"""
+    """Return list of dicts: {name, path, display_name, value_nH}"""
     bom_dir = get_project_root() / "Inductors_BOM"
     results = []
     for f in sorted(bom_dir.glob("*.s2p")):
         name = f.stem
-        # Pattern: LQP02TQ{CODE}B02 or LQP02TQ{CODE}H02
         m = re.search(r'TQ([0-9N]+)[A-Z]\d+', name, re.IGNORECASE)
         if m:
             code = m.group(1).upper()
             display = f"{_parse_ind_value(code)} - {name}"
+            value_nh = _parse_ind_value_nh(code)
         else:
             display = name
-        results.append({"name": name, "path": str(f), "display_name": display})
+            value_nh = 0.0
+        results.append({"name": name, "path": str(f), "display_name": display, "value_nH": value_nh})
     return results
 
 def get_capacitor_path(name: str) -> str:

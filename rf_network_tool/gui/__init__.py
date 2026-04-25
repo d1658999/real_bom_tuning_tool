@@ -13,6 +13,11 @@ class PortConfig:
     connect_to_file: str = ""  # file id for 'connect' type
     connect_to_port: int = 1   # 1-based port number
     signal_index: int = 1      # 1 or 2 for 'signal' type
+    # Value range limits for fleet sweep (open/ind, open/cap, open/ind/cap)
+    ind_min_nh: float = 0.0
+    ind_max_nh: float = 10000.0   # 10 µH — effectively no upper limit
+    cap_min_pf: float = 0.0
+    cap_max_pf: float = 10000.0   # 10 nF — effectively no upper limit
 
 
 @dataclass

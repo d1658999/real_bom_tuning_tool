@@ -249,28 +249,38 @@ class FleetOptimizer:
                 cfg.terminations[fid][pnum] = term
         return cfg
 
-    def _get_candidate_components(self, term_type: str) -> List[dict]:
-        """Get list of component candidates for a given type."""
+    def _get_candidate_components(
+        self, term_type: str,
+        ind_min_nh: float = 0.0, ind_max_nh: float = 10000.0,
+        cap_min_pf: float = 0.0, cap_max_pf: float = 10000.0,
+    ) -> List[dict]:
+        """Get list of component candidates for a given type, filtered by value range."""
+
+        def _ind_ok(i: dict) -> bool:
+            v = i.get('value_nH', 0.0)
+            return ind_min_nh <= v <= ind_max_nh
+
+        def _cap_ok(c: dict) -> bool:
+            v = c.get('value_pF', 0.0)
+            return cap_min_pf <= v <= cap_max_pf
+
         if term_type == 'capacitor':
-            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
-                    for c in list_capacitors()]
+            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor', 'value_pF': c.get('value_pF', 0.0)}
+                    for c in list_capacitors() if _cap_ok(c)]
         elif term_type == 'inductor':
-            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
-                    for i in list_inductors()]
+            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor', 'value_nH': i.get('value_nH', 0.0)}
+                    for i in list_inductors() if _ind_ok(i)]
         elif term_type == 'open/ind':
-            # Sweep all inductors only (open is always included as None)
-            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
-                    for i in list_inductors()]
+            return [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor', 'value_nH': i.get('value_nH', 0.0)}
+                    for i in list_inductors() if _ind_ok(i)]
         elif term_type == 'open/cap':
-            # Sweep all capacitors only (open is always included as None)
-            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
-                    for c in list_capacitors()]
+            return [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor', 'value_pF': c.get('value_pF', 0.0)}
+                    for c in list_capacitors() if _cap_ok(c)]
         elif term_type == 'open/ind/cap':
-            # Sweep all capacitors AND all inductors (open is always included as None)
-            caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor'}
-                    for c in list_capacitors()]
-            inds = [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor'}
-                    for i in list_inductors()]
+            caps = [{'name': c['name'], 'path': c['path'], 'comp_type': 'capacitor', 'value_pF': c.get('value_pF', 0.0)}
+                    for c in list_capacitors() if _cap_ok(c)]
+            inds = [{'name': i['name'], 'path': i['path'], 'comp_type': 'inductor', 'value_nH': i.get('value_nH', 0.0)}
+                    for i in list_inductors() if _ind_ok(i)]
             return caps + inds
         return []
 
@@ -284,7 +294,12 @@ class FleetOptimizer:
         """
         candidates_per_port = []
         for nid, pnum, ttype in tunable_ports:
-            comps = self._get_candidate_components(ttype)
+            pc = self.app_state.files[nid].ports[pnum]
+            comps = self._get_candidate_components(
+                ttype,
+                ind_min_nh=pc.ind_min_nh, ind_max_nh=pc.ind_max_nh,
+                cap_min_pf=pc.cap_min_pf, cap_max_pf=pc.cap_max_pf,
+            )
             candidates_per_port.append([None] + comps)  # None = open
 
         total = 1
