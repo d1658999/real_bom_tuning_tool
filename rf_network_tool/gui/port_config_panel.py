@@ -170,6 +170,10 @@ class PortConfigPanel(QWidget):
 
                 self._signal_freq_spinboxes[sig_idx] = (start_spin, stop_spin)
 
+                # Persist the displayed value immediately so plots always see correct range
+                # even if the user never explicitly edits this spinbox.
+                self.app_state.signal_freq_ranges[sig_idx] = (start_val, stop_val)
+
                 row_widget = QWidget()
                 row_layout = QHBoxLayout(row_widget)
                 row_layout.setContentsMargins(0, 0, 0, 0)

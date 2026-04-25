@@ -56,41 +56,68 @@ class ResultsPanel(QWidget):
                           transform=self.ax_text.transAxes, fontsize=9, color="gray")
         self.canvas.draw_idle()
 
-    def plot_network(self, net: rf.Network, freq_start: float, freq_stop: float):
+    def plot_network(self, net: rf.Network, freq_start: float, freq_stop: float,
+                     signal_freq_ranges: dict = None):
         """Plot an N-port rf.Network: Smith, VSWR, IL, and text summary.
 
         Convention: antenna port = last port (index N-1).
-        Signal ports: 0 .. N-2. IL = antenna-to-each-signal transmission.
+        Signal ports: 0..N-2. IL = antenna-to-each-signal transmission.
+
+        signal_freq_ranges: {signal_index (1-based int): (start_ghz, stop_ghz)}.
+        When provided, each signal port's traces are clipped to its own band;
+        the antenna port uses the union of all non-antenna bands.
+        Falls back to global (freq_start, freq_stop) for any missing entry.
         """
         self._init_axes()
         freqs_ghz = net.f / 1e9
         n = net.nports
         ant = n - 1  # antenna port index
 
-        # Colour palette: s1=blue, s2=red, s3=green, s4=orange (up to 4 ports)
         COLORS = ["blue", "red", "green", "darkorange"]
 
-        # ---- Smith chart (all Sii reflections) --------------------------
-        smith_ok = False
-        try:
-            for i in range(n):
-                label = f"S{i+1}{i+1}"
-                net.plot_s_smith(m=i, n=i, ax=self.ax_smith,
-                                 color=COLORS[i % len(COLORS)],
-                                 label=label, show_legend=False)
-            smith_ok = True
-        except Exception:
-            pass
+        # Build per-port boolean masks (index 0..ant-1 = non-ant; index ant = antenna union)
+        sfr = signal_freq_ranges or {}
+        port_masks = []
+        for i in range(ant):
+            start, stop = sfr.get(i + 1, (freq_start, freq_stop))
+            port_masks.append((freqs_ghz >= start) & (freqs_ghz <= stop))
+        ant_mask = np.zeros(len(freqs_ghz), dtype=bool)
+        for m in port_masks:
+            ant_mask |= m
+        port_masks.append(ant_mask)  # index = ant
 
-        if not smith_ok:
-            self._draw_smith_background(self.ax_smith)
-            for i in range(n):
-                s_ii = net.s[:, i, i]
-                self.ax_smith.plot(s_ii.real, s_ii.imag,
-                                   color=COLORS[i % len(COLORS)],
-                                   label=f"S{i+1}{i+1}", linewidth=1)
+        # Determine x-axis range for shared axes: union of all signal bands
+        sig_starts = [sfr.get(i + 1, (freq_start, freq_stop))[0] for i in range(ant)] or [freq_start]
+        sig_stops  = [sfr.get(i + 1, (freq_start, freq_stop))[1] for i in range(ant)] or [freq_stop]
+        x_start, x_stop = min(sig_starts), max(sig_stops)
 
-        # VSWR=2 reference circle
+        # ---- Smith chart: each Sii plotted within its own freq mask -----
+        # Antenna is split into per-band segments with distinct linestyles so
+        # the user can tell which arc belongs to which signal's freq band.
+        BAND_STYLES = ['-', '--', ':', '-.']  # one style per non-ant band
+        self._draw_smith_background(self.ax_smith)
+        for i in range(n):
+            color = COLORS[i % len(COLORS)]
+            if i == ant and ant > 1:
+                # One separate trace per non-ant band — different linestyle, labelled
+                for band_i in range(ant):
+                    bm = port_masks[band_i]
+                    if not np.any(bm):
+                        continue
+                    s_ant = net.s[bm, ant, ant]
+                    s_i, e_i = sfr.get(band_i + 1, (freq_start, freq_stop))
+                    lbl = f"S{ant+1}{ant+1}[s{band_i+1}:{s_i:.2f}\u2013{e_i:.2f}]"
+                    self.ax_smith.plot(s_ant.real, s_ant.imag,
+                                       color=color,
+                                       linestyle=BAND_STYLES[band_i % len(BAND_STYLES)],
+                                       label=lbl, linewidth=1.4)
+            else:
+                mask = port_masks[i]
+                s_ii = net.s[mask, i, i]
+                tag = " ANT" if i == ant else ""
+                self.ax_smith.plot(s_ii.real, s_ii.imag, color=color,
+                                   label=f"S{i+1}{i+1}{tag}", linewidth=1.2)
+
         vswr2_r = 1.0 / 3.0
         circle = mpatches.Circle((0, 0), vswr2_r, fill=False,
                                   linestyle="--", color="green",
@@ -100,16 +127,37 @@ class ResultsPanel(QWidget):
         port_labels = "/".join(f"S{i+1}{i+1}" for i in range(n))
         self.ax_smith.set_title(f"Smith Chart ({port_labels})", fontsize=9)
 
-        # ---- VSWR (all ports) ------------------------------------------
-        vswr_values = []
+        # ---- VSWR: each port within its own freq mask -------------------
+        # Antenna uses NaN-separated per-band segments (same NaN trick as Smith).
+        vswr_maxes = []
         for i in range(n):
-            s_ii_mag = np.clip(np.abs(net.s[:, i, i]), 0, 0.9999)
-            vswr_i = (1 + s_ii_mag) / (1 - s_ii_mag)
-            vswr_values.append(vswr_i)
-            lbl = f"VSWR(S{i+1}{i+1})" + (" ← ANT" if i == ant else "")
-            self.ax_vswr.plot(freqs_ghz, vswr_i,
-                              color=COLORS[i % len(COLORS)],
-                              label=lbl, linewidth=1)
+            color = COLORS[i % len(COLORS)]
+            if i == ant and ant > 1:
+                # One segment per non-ant band; track overall max across all bands
+                freq_parts, vswr_parts, band_maxes = [], [], []
+                for band_i in range(ant):
+                    bm = port_masks[band_i]
+                    if np.any(bm):
+                        fq = freqs_ghz[bm]
+                        sm = np.clip(np.abs(net.s[bm, ant, ant]), 0, 0.9999)
+                        vv = (1 + sm) / (1 - sm)
+                        band_maxes.append(float(np.max(vv)))
+                        if freq_parts:
+                            freq_parts.append(np.nan)
+                            vswr_parts.append(np.nan)
+                        freq_parts.extend(fq.tolist())
+                        vswr_parts.extend(vv.tolist())
+                vswr_maxes.append(max(band_maxes) if band_maxes else 0.0)
+                self.ax_vswr.plot(freq_parts, vswr_parts, color=color,
+                                  label=f"VSWR(S{ant+1}{ant+1}) \u2190 ANT", linewidth=1)
+            else:
+                mask = port_masks[i]
+                freq_i = freqs_ghz[mask]
+                s_mag = np.clip(np.abs(net.s[mask, i, i]), 0, 0.9999)
+                vswr_i = (1 + s_mag) / (1 - s_mag)
+                vswr_maxes.append(float(np.max(vswr_i)) if len(vswr_i) > 0 else 0.0)
+                self.ax_vswr.plot(freq_i, vswr_i, color=color,
+                                  label=f"VSWR(S{i+1}{i+1})", linewidth=1)
 
         self.ax_vswr.axhline(2.0, color="green", linestyle="--",
                              linewidth=0.8, label="VSWR=2")
@@ -117,18 +165,20 @@ class ResultsPanel(QWidget):
         self.ax_vswr.set_ylabel("VSWR", fontsize=8)
         self.ax_vswr.set_title("VSWR", fontsize=9)
         self.ax_vswr.legend(fontsize=7)
-        self.ax_vswr.set_xlim(freq_start, freq_stop)
+        self.ax_vswr.set_xlim(x_start, x_stop)
         self.ax_vswr.grid(True, linewidth=0.4)
         self.ax_vswr.tick_params(labelsize=7)
 
-        # ---- Insertion Loss (antenna → each signal port) ---------------
+        # ---- IL: S_{ant,i} plotted within signal i's freq mask ----------
         il_values = []
         il_labels = []
-        for i in range(ant):  # signal ports 0..ant-1
-            s_ant_i = np.clip(np.abs(net.s[:, ant, i]), 1e-15, None)
+        for i in range(ant):
+            mask = port_masks[i]
+            freq_i = freqs_ghz[mask]
+            s_ant_i = np.clip(np.abs(net.s[mask, ant, i]), 1e-15, None)
             il_db = 20 * np.log10(s_ant_i)
             label = f"S{ant+1}{i+1} (IL)"
-            self.ax_il.plot(freqs_ghz, il_db,
+            self.ax_il.plot(freq_i, il_db,
                             color=COLORS[i % len(COLORS)],
                             label=label, linewidth=1)
             il_values.append(il_db)
@@ -139,27 +189,42 @@ class ResultsPanel(QWidget):
         self.ax_il.set_ylabel("Magnitude (dB)", fontsize=8)
         self.ax_il.set_title(f"Insertion Loss ({ant_lbl})", fontsize=9)
         self.ax_il.legend(fontsize=7)
-        self.ax_il.set_xlim(freq_start, freq_stop)
+        self.ax_il.set_xlim(x_start, x_stop)
         self.ax_il.grid(True, linewidth=0.4)
         self.ax_il.tick_params(labelsize=7)
 
-        # ---- Text summary ----------------------------------------------
+        # ---- Text summary (per-port freq ranges) -----------------------
         npts = len(freqs_ghz)
         lines = [
-            f"Freq Range:  {freq_start:.3f} – {freq_stop:.3f} GHz",
+            f"Freq Range:  {freq_start:.3f} \u2013 {freq_stop:.3f} GHz",
             f"Points:      {npts}",
             f"Ports:       {n}  (antenna = s{ant+1})",
             "",
         ]
         for i in range(n):
-            worst_v = float(np.max(vswr_values[i]))
             tag = " (ANT)" if i == ant else ""
-            lines.append(f"VSWR(S{i+1}{i+1}){tag}: {worst_v:.2f}")
+            if i < ant:
+                s_i, e_i = sfr.get(i + 1, (freq_start, freq_stop))
+            else:
+                s_i, e_i = x_start, x_stop
+            if vswr_maxes[i] > 0:
+                lines.append(
+                    f"VSWR(S{i+1}{i+1}){tag}: {vswr_maxes[i]:.2f}"
+                    f"  [{s_i:.3f}\u2013{e_i:.3f} GHz]"
+                )
+            else:
+                lines.append(f"VSWR(S{i+1}{i+1}){tag}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
 
         lines.append("")
         for i, (il_db, lbl) in enumerate(zip(il_values, il_labels)):
-            lines.append(f"Min {lbl}: {float(np.min(il_db)):.2f} dB")
-            lines.append(f"Avg {lbl}: {float(np.mean(il_db)):.2f} dB")
+            s_i, e_i = sfr.get(i + 1, (freq_start, freq_stop))
+            if len(il_db) > 0:
+                lines.append(
+                    f"Min {lbl}: {float(np.min(il_db)):.2f} dB  [{s_i:.3f}\u2013{e_i:.3f} GHz]"
+                )
+                lines.append(f"Avg {lbl}: {float(np.mean(il_db)):.2f} dB")
+            else:
+                lines.append(f"{lbl}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
 
         summary = "\n".join(lines)
         self.ax_text.set_title("Summary", fontsize=9)

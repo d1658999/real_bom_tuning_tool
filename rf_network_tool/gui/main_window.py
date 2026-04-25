@@ -242,7 +242,8 @@ class MainWindow(QMainWindow):
         self.result_panel.plot_network(
             net,
             self.app_state.freq_start_ghz,
-            self.app_state.freq_stop_ghz
+            self.app_state.freq_stop_ghz,
+            signal_freq_ranges=self.app_state.signal_freq_ranges,
         )
         npts = net.nports
         nf   = len(net.f)
