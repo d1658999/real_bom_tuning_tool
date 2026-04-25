@@ -101,12 +101,12 @@
 			
 		file: [confidential]MLF08_20GHz_011520_ANT6_SLB.s2p
 			freq range: 3.3GHz to 5GHz
-			Port[1] --> connect to Port[2] = ANT6_UHB0_SLB_CONN  from `G653-10828-01_RJ_v22_G653-10828-01_RJ_v22.s4p`
+			Port[1] --> connect to Port[2] = ANT6_UHB0_SLB_CONN  from `Cubs_RJF_DK2p55.s4p`
 			Port[2] --> connect to Port[5] = ANT6_UHB0_SLB_CONN  from `ASK_SLB_0403_ASK_SLB_0403_ANT6_7.s10p`
 			
 		file: [confidential]MLF08_20GHz_011520_ANT6_CLB.s2p
 			freq range: 3.3GHz to 5GHz
-			Port[1] --> connect to Port[2] = ANT6_UHB0_CLB_CONN  from `G653-10828-01_RJ_v22_G653-10828-01_RJ_v22.s4p`
+			Port[1] --> connect to Port[2] = ANT6_UHB0_CLB_CONN  from `Cubs_RJF_DK2p55.s4p`
 			Port[2] --> connect to Port[4] = ANT6_CLB_BTB   from `G651-19062-01_CLB_V22_G651-19062-01_CLB_V22_cutout.s12p`
 		
 		file: Cubs_RJF_DK2p55.s4p
