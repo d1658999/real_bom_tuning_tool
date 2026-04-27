@@ -6,7 +6,18 @@ from pathlib import Path
 import re
 
 def get_project_root() -> Path:
-    """Return project root: parent of rf_network_tool/."""
+    """
+    Return the folder that contains the BOM directories.
+
+    • When running as a PyInstaller .exe (sys.frozen), use the directory of
+      the executable — the user is expected to place Inductors_BOM/ and
+      Capacitors_BOM/ next to rf_network_tool.exe.
+    • When running from source, use the project root (parent of
+      rf_network_tool/).
+    """
+    import sys
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
     return Path(__file__).parent.parent.parent
 
 def _parse_cap_value(code: str) -> str:
