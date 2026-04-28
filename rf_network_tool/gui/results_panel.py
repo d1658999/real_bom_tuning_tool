@@ -86,10 +86,8 @@ class ResultsPanel(QWidget):
             ant_mask |= m
         port_masks.append(ant_mask)  # index = ant
 
-        # Determine x-axis range for shared axes: union of all signal bands
-        sig_starts = [sfr.get(i + 1, (freq_start, freq_stop))[0] for i in range(ant)] or [freq_start]
-        sig_stops  = [sfr.get(i + 1, (freq_start, freq_stop))[1] for i in range(ant)] or [freq_stop]
-        x_start, x_stop = min(sig_starts), max(sig_stops)
+        # Determine x-axis range for shared axes: use global simulation frequency range
+        x_start, x_stop = freq_start, freq_stop
 
         # ---- Smith chart: each Sii plotted within its own freq mask -----
         # Antenna is split into per-band segments with distinct linestyles so

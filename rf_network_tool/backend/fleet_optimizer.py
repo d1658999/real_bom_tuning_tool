@@ -23,6 +23,35 @@ import os
 from .bom_parser import list_capacitors, list_inductors
 from .network_builder import NetworkConfig, PortTermination, build_network_from_config
 
+
+def _nan_separate(freq_arr: np.ndarray, *data_arrs, gap_factor: float = 3.0):
+    """Insert np.nan separators at large frequency gaps to break matplotlib lines.
+
+    Returns (freq_out, data1_out, data2_out, ...) as np.ndarray each.
+    gap_factor: a step > gap_factor * median_step is treated as a band gap.
+    """
+    freq_arr = np.asarray(freq_arr, dtype=float)
+    data_arrs = [np.asarray(d, dtype=float) for d in data_arrs]
+    if len(freq_arr) < 2:
+        return (freq_arr,) + tuple(data_arrs)
+    steps = np.diff(freq_arr)
+    median_step = np.median(steps)
+    gap_mask = steps > gap_factor * median_step
+    if not np.any(gap_mask):
+        return (freq_arr,) + tuple(data_arrs)
+    # Insert NaN after each gap index
+    gap_positions = np.where(gap_mask)[0] + 1  # positions to insert NaN before
+    out_lists = [[] for _ in range(1 + len(data_arrs))]
+    prev = 0
+    for pos in gap_positions:
+        for j, arr in enumerate([freq_arr] + data_arrs):
+            out_lists[j].extend(arr[prev:pos].tolist())
+            out_lists[j].append(np.nan)
+        prev = pos
+    for j, arr in enumerate([freq_arr] + data_arrs):
+        out_lists[j].extend(arr[prev:].tolist())
+    return tuple(np.array(lst) for lst in out_lists)
+
 # Try to import the Rust extension for accelerated sweeps
 try:
     import rf_sweep as _rf_sweep
@@ -76,6 +105,9 @@ class AgentResult:
     sii_re_list:  List[List[float]] = field(default_factory=list)
     sii_im_list:  List[List[float]] = field(default_factory=list)
     freq_ghz_list: List[List[float]] = field(default_factory=list)  # per-port freq arrays
+    signal_freq_ranges_list: List[List[float]] = field(default_factory=list)  # [[start1,stop1],[start2,stop2],...] per non-ant port
+    global_freq_start: float = 0.0
+    global_freq_stop: float = 0.0
 
 
 @dataclass
@@ -713,6 +745,9 @@ class FleetOptimizer:
             sii_re_list =best.get('sii_re_list',  []),
             sii_im_list =best.get('sii_im_list',  []),
             freq_ghz_list=best.get('freq_ghz_list', []),
+            signal_freq_ranges_list=[[s, e] for s, e in sfr],
+            global_freq_start=self.app_state.freq_start_ghz,
+            global_freq_stop=self.app_state.freq_stop_ghz,
         )
 
     def _compute_risk_scores(self, agent_results: List[AgentResult]) -> Dict[str, float]:
@@ -770,10 +805,25 @@ class FleetOptimizer:
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=0.8, label='VSWR=2')
         if result.sii_re_list:
+            BAND_STYLES = ['-', '--', ':', '-.']
             for i, (re_vals, im_vals) in enumerate(zip(result.sii_re_list, result.sii_im_list)):
-                tag = " ANT" if i == ant else ""
-                ax.plot(re_vals, im_vals, color=COLORS[i % len(COLORS)], lw=1.5,
-                        label=f'S{i+1}{i+1}{tag}')
+                color = COLORS[i % len(COLORS)]
+                if i == ant and ant > 1 and result.signal_freq_ranges_list:
+                    # One trace per band with distinct linestyle
+                    freq_arr = np.array(result.freq_ghz_list[ant] if i < len(result.freq_ghz_list) else result.freq_ghz)
+                    re_arr = np.array(re_vals)
+                    im_arr = np.array(im_vals)
+                    for band_i, (band_start, band_stop) in enumerate(result.signal_freq_ranges_list):
+                        bm = (freq_arr >= band_start) & (freq_arr <= band_stop)
+                        if not np.any(bm):
+                            continue
+                        lbl = f'S{ant+1}{ant+1}[s{band_i+1}:{band_start:.2f}\u2013{band_stop:.2f}]'
+                        ax.plot(re_arr[bm], im_arr[bm],
+                                color=color, linestyle=BAND_STYLES[band_i % len(BAND_STYLES)],
+                                lw=1.5, label=lbl)
+                else:
+                    tag = " ANT" if i == ant else ""
+                    ax.plot(re_vals, im_vals, color=color, lw=1.5, label=f'S{i+1}{i+1}{tag}')
         else:
             # Fallback legacy fields
             if result.s11_re:
@@ -790,8 +840,11 @@ class FleetOptimizer:
                 freq_arr = np.array(freq_i)
                 s_arr = np.clip(np.array(mag), 0, 0.9999)
                 vswr_i = (1 + s_arr) / (1 - s_arr)
+                color = COLORS[i % len(COLORS)]
                 tag = " ANT" if i == ant else ""
-                ax.plot(freq_arr, vswr_i, color=COLORS[i % len(COLORS)], label=f'VSWR S{i+1}{i+1}{tag}')
+                if i == ant and ant > 1:
+                    freq_arr, vswr_i = _nan_separate(freq_arr, vswr_i)[:2]
+                ax.plot(freq_arr, vswr_i, color=color, label=f'VSWR S{i+1}{i+1}{tag}')
         else:
             s11 = np.array(result.s11_mag); s22 = np.array(result.s22_mag)
             ax.plot(freq, (1+s11)/(1-np.clip(s11,0,0.9999)), 'b-',
@@ -802,6 +855,8 @@ class FleetOptimizer:
         ax.axhline(2.0, color='orange', linestyle='--', lw=0.8, label='VSWR=2.0')
         ax.set_xlabel('Frequency (GHz)'); ax.set_ylabel('VSWR'); ax.set_title('VSWR')
         ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
+        if result.global_freq_start or result.global_freq_stop:
+            ax.set_xlim(result.global_freq_start, result.global_freq_stop)
 
         # IL
         ax = axes[2]
@@ -815,6 +870,8 @@ class FleetOptimizer:
                     label=f'IL (worst={result.worst_il_db:.2f}dB)')
         ax.set_xlabel('Frequency (GHz)'); ax.set_ylabel('dB')
         ax.set_title('Insertion Loss'); ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
+        if result.global_freq_start or result.global_freq_stop:
+            ax.set_xlim(result.global_freq_start, result.global_freq_stop)
 
         plt.tight_layout()
         fname = output_dir / f"agent_{result.agent_id}_{result.agent_name.replace(' ', '_').replace('-', '')}.png"
@@ -878,10 +935,24 @@ class FleetOptimizer:
         r2 = 1/3
         ax.plot(r2*np.cos(theta), r2*np.sin(theta), 'k--', lw=1.2, label='VSWR=2')
         if winner.sii_re_list:
+            BAND_STYLES = ['-', '--', ':', '-.']
             for i, (re_vals, im_vals) in enumerate(zip(winner.sii_re_list, winner.sii_im_list)):
-                tag = " ANT" if i == ant else ""
-                ax.plot(re_vals, im_vals, color=COLORS[i % len(COLORS)], lw=2,
-                        label=f'S{i+1}{i+1}{tag}')
+                color = COLORS[i % len(COLORS)]
+                if i == ant and ant > 1 and winner.signal_freq_ranges_list:
+                    freq_arr = np.array(winner.freq_ghz_list[ant] if i < len(winner.freq_ghz_list) else winner.freq_ghz)
+                    re_arr = np.array(re_vals)
+                    im_arr = np.array(im_vals)
+                    for band_i, (band_start, band_stop) in enumerate(winner.signal_freq_ranges_list):
+                        bm = (freq_arr >= band_start) & (freq_arr <= band_stop)
+                        if not np.any(bm):
+                            continue
+                        lbl = f'S{ant+1}{ant+1}[s{band_i+1}:{band_start:.2f}\u2013{band_stop:.2f}]'
+                        ax.plot(re_arr[bm], im_arr[bm],
+                                color=color, linestyle=BAND_STYLES[band_i % len(BAND_STYLES)],
+                                lw=2, label=lbl)
+                else:
+                    tag = " ANT" if i == ant else ""
+                    ax.plot(re_vals, im_vals, color=color, lw=2, label=f'S{i+1}{i+1}{tag}')
         else:
             if winner.s11_re:
                 ax.plot(np.array(winner.s11_re), np.array(winner.s11_im), 'b-', lw=2, label='S11')
@@ -899,8 +970,11 @@ class FleetOptimizer:
                 freq_arr = np.array(freq_i)
                 s_arr = np.clip(np.array(mag), 0, 0.9999)
                 vswr_i = (1 + s_arr) / (1 - s_arr)
+                color = COLORS[i % len(COLORS)]
                 tag = " ANT" if i == ant else ""
-                ax.plot(freq_arr, vswr_i, color=COLORS[i % len(COLORS)],
+                if i == ant and ant > 1:
+                    freq_arr, vswr_i = _nan_separate(freq_arr, vswr_i)[:2]
+                ax.plot(freq_arr, vswr_i, color=color,
                         label=f'VSWR S{i+1}{i+1}{tag}')
         else:
             s11 = np.array(winner.s11_mag); s22 = np.array(winner.s22_mag)
@@ -915,6 +989,8 @@ class FleetOptimizer:
         ax.set_title('VSWR (Final)')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        if winner.global_freq_start or winner.global_freq_stop:
+            ax.set_xlim(winner.global_freq_start, winner.global_freq_stop)
 
         # IL
         ax = axes[2]
@@ -931,6 +1007,8 @@ class FleetOptimizer:
         ax.set_title('Insertion Loss (Final)')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        if winner.global_freq_start or winner.global_freq_stop:
+            ax.set_xlim(winner.global_freq_start, winner.global_freq_stop)
 
         plt.tight_layout()
         fname = output_dir / "final_decision.png"
