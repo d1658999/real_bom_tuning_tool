@@ -48,7 +48,7 @@ class FilePanel(QWidget):
             "Open S-Parameter Files",
             "",
             "Touchstone Files (*.s1p *.s2p *.s3p *.s4p *.s5p *.s6p *.s7p "
-            "*.s8p *.s9p *.s10p *.s11p *.s12p *.snp);;All Files (*)"
+            "*.s8p *.s9p *.s10p *.s11p *.s12p *.s*p);;All Files (*)"
         )
         added = 0
         for path in paths:
