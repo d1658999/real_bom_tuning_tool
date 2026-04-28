@@ -469,24 +469,37 @@ class FleetOptimizer:
             base_net, ordered_keys = build_base_network_for_fleet(base_config, tunable_keys)
             nfreq = len(base_net.frequency)
             f_ghz = base_net.frequency.f / 1e9
-            # Build per-signal ranges and compute union for Rust pre-filter
             n_signals = base_net.nports - len(tunable_ports)
-            sfr = self._get_signal_freq_ranges(n_signals)
-            union_start = min(r[0] for r in sfr)
-            union_stop  = max(r[1] for r in sfr)
-            mask = (f_ghz >= union_start) & (f_ghz <= union_stop)
-            eval_indices = np.where(mask)[0]
+
+            # Build per-signal eval ranges (one per signal port, including antenna)
+            sfr_non_ant = self._get_signal_freq_ranges(n_signals - 1)  # non-ant signal ports only
+            eval_ranges = []
+            for start_ghz, stop_ghz in sfr_non_ant:
+                mask_i = (f_ghz >= start_ghz) & (f_ghz <= stop_ghz)
+                idx_i = np.where(mask_i)[0]
+                if len(idx_i) > 0:
+                    eval_ranges.append((int(idx_i[0]), int(idx_i[-1])))
+                else:
+                    eval_ranges.append((0, 0))
+
+            # Antenna port = union of all non-ant bands
+            if eval_ranges:
+                ant_start_idx = min(r[0] for r in eval_ranges if r[1] > r[0])
+                ant_stop_idx  = max(r[1] for r in eval_ranges)
+            else:
+                ant_start_idx, ant_stop_idx = 0, nfreq - 1
+            eval_ranges.append((ant_start_idx, ant_stop_idx))
         except Exception as e:
             self._log(f"  [Rust] Base network build failed: {e}, falling back to Python")
             return self._sweep_python(base_config, tunable_ports, candidates_per_port, total)
 
-        if len(eval_indices) == 0:
-            self._log("  [Rust] No freq points in range, falling back to Python")
+        # Check all ranges are valid
+        if any(r[1] <= r[0] for r in eval_ranges):
+            self._log("  [Rust] Empty or invalid eval range, falling back to Python")
             return self._sweep_python(base_config, tunable_ports, candidates_per_port, total)
-        eval_start, eval_stop = int(eval_indices[0]), int(eval_indices[-1])
 
         self._log(f"  [Rust] Base network: {base_net.nports} ports, {nfreq} freq points")
-        self._log(f"  [Rust] Eval range indices: {eval_start}..{eval_stop}")
+        self._log(f"  [Rust] Per-signal eval ranges: {eval_ranges}")
 
         # Build gamma arrays per tunable port: shape (n_cands, nfreq)
         # Row 0 = open (Γ = +1), rows 1..n_cands-1 = component gammas
@@ -532,8 +545,7 @@ class FleetOptimizer:
             np.ascontiguousarray(base_s.imag, dtype=np.float64),
             [np.ascontiguousarray(g, dtype=np.float64) for g in term_gammas_re],
             [np.ascontiguousarray(g, dtype=np.float64) for g in term_gammas_im],
-            eval_start,
-            eval_stop,
+            eval_ranges,
             n_signals,
         )
         self._log(f"  [Rust] Sweep complete: {len(vswr_s11):,} valid combinations")
@@ -607,18 +619,19 @@ class FleetOptimizer:
         if agent_id == 1:
             name = "Agent 1 - Min BOM"
             strategy = "Fewest components within 10% of the best achievable VSWR"
-            # Determine the globally best (minimum) VSWR achievable across all candidates.
-            vswr_floor = min(max(r['vswr_s11_max'], r['vswr_s22_max']) for r in all_results)
+            # Base the floor on non-antenna signal port VSWR only.
+            # The antenna (common) port's VSWR is a secondary concern — it sees all bands
+            # simultaneously and is harder to match independently.
+            vswr_floor = min(r['vswr_s11_max'] for r in all_results)
             # Accept results within 10% above the floor.  This prevents "open" (0 components)
             # from winning just because it scrapes under a loose absolute threshold — it only
             # wins if it genuinely comes close to what any component can achieve.
             vswr_threshold = vswr_floor * 1.10
-            near_optimal = [r for r in all_results
-                            if max(r['vswr_s11_max'], r['vswr_s22_max']) <= vswr_threshold]
-            # Among near-optimal results, prefer fewest components; break ties by VSWR.
+            near_optimal = [r for r in all_results if r['vswr_s11_max'] <= vswr_threshold]
+            # Among near-optimal, prefer fewest components; break ties by signal+ant combined VSWR.
             best = min(near_optimal, key=lambda r: (
                 self._count_components(r['assignments']),
-                max(r['vswr_s11_max'], r['vswr_s22_max'])
+                r['vswr_s11_max'] + r['vswr_s22_max']
             ))
 
         elif agent_id == 2:
@@ -639,8 +652,10 @@ class FleetOptimizer:
 
         elif agent_id == 3:
             name = "Agent 3 - Min VSWR"
-            strategy = "Strictly minimize peak VSWR"
-            best = min(all_results, key=lambda r: max(r['vswr_s11_max'], r['vswr_s22_max']))
+            strategy = "Strictly minimize peak VSWR across signal ports"
+            # Minimize VSWR at non-antenna signal ports (s1, s2, ...) — these are what
+            # matching networks control. Antenna port VSWR is a secondary objective.
+            best = min(all_results, key=lambda r: (r['vswr_s11_max'], r['vswr_s22_max']))
 
         elif agent_id == 4:
             name = "Agent 4 - Smith Contour"

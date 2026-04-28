@@ -49,42 +49,59 @@ fn apply_termination(
 
 /// Evaluate N-port metrics from a flat (nfreq * n * n) complex S-matrix.
 /// Antenna port = port index n-1 (last signal port).
+///
+/// signal_eval_ranges: slice of (start_idx, stop_idx) per signal port (0-indexed).
+/// Length must be >= n. Each non-antenna port i is evaluated only over signal_eval_ranges[i].
+/// Antenna port (n-1) is evaluated over signal_eval_ranges[n-1] (= union of all bands).
+///
 /// Returns:
 ///   (vswr_non_ant_max, vswr_ant_max, worst_il_db)
 /// where:
-///   vswr_non_ant_max = max VSWR across ports 0..n-2 (all non-antenna signal ports)
-///   vswr_ant_max     = VSWR at port n-1 (antenna port)
-///   worst_il_db      = worst (most negative) insertion loss S[ant→signal] for any signal port
+///   vswr_non_ant_max = max VSWR across ports 0..n-2, each over its own band
+///   vswr_ant_max     = VSWR at port n-1 (antenna), over antenna union band
+///   worst_il_db      = worst IL S[ant→signal_i] for any port i, over port i's band
 fn compute_metrics_n(
     s: &[Complex64],
     nfreq: usize,
     n: usize,
-    eval_start: usize,
-    eval_stop: usize,
+    signal_eval_ranges: &[(usize, usize)],
 ) -> (f64, f64, f64) {
     let mut vswr_non_ant_max = 1.0_f64;
     let mut vswr_ant_max = 1.0_f64;
     let mut worst_il_db = 0.0_f64;
     let ant = n - 1;
 
-    for f in eval_start..=eval_stop.min(nfreq - 1) {
-        // VSWR at antenna port
-        let s_ant_ant = s[f * n * n + ant * n + ant].norm().min(0.99999);
-        let v_ant = (1.0 + s_ant_ant) / (1.0 - s_ant_ant);
-        if v_ant > vswr_ant_max { vswr_ant_max = v_ant; }
-
-        // VSWR at non-antenna signal ports, and IL from antenna to each
-        for i in 0..ant {
+    // Non-antenna signal ports: each evaluated over its own freq band
+    for i in 0..ant {
+        let (start, stop) = if i < signal_eval_ranges.len() {
+            signal_eval_ranges[i]
+        } else {
+            (0, nfreq.saturating_sub(1))
+        };
+        for f in start..=stop.min(nfreq.saturating_sub(1)) {
             let s_ii = s[f * n * n + i * n + i].norm().min(0.99999);
-            let v_i = (1.0 + s_ii) / (1.0 - s_ii);
-            if v_i > vswr_non_ant_max { vswr_non_ant_max = v_i; }
+            let v = (1.0 + s_ii) / (1.0 - s_ii);
+            if v > vswr_non_ant_max { vswr_non_ant_max = v; }
 
-            // S[ant, i]: transmission from signal port i to antenna port
+            // IL from this signal port to antenna
             let s_ant_i = s[f * n * n + ant * n + i].norm().max(1e-15_f64);
             let il = 20.0 * s_ant_i.log10();
             if il < worst_il_db { worst_il_db = il; }
         }
     }
+
+    // Antenna port: evaluated over its union band (last entry in signal_eval_ranges)
+    let (ant_start, ant_stop) = if ant < signal_eval_ranges.len() {
+        signal_eval_ranges[ant]
+    } else {
+        (0, nfreq.saturating_sub(1))
+    };
+    for f in ant_start..=ant_stop.min(nfreq.saturating_sub(1)) {
+        let s_ant_ant = s[f * n * n + ant * n + ant].norm().min(0.99999);
+        let v_ant = (1.0 + s_ant_ant) / (1.0 - s_ant_ant);
+        if v_ant > vswr_ant_max { vswr_ant_max = v_ant; }
+    }
+
     (vswr_non_ant_max, vswr_ant_max, worst_il_db)
 }
 
@@ -114,8 +131,7 @@ fn build_combos(counts: &[usize]) -> Vec<Vec<usize>> {
 /// * `term_gammas_re` / `_im`   - list of (n_cands, nfreq) float64 per tunable port.
 ///                                Row 0 = open (Γ=+1 re=1, im=0).
 ///                                Rows 1..n_cands = actual component gammas.
-/// * `eval_start_idx`            - first frequency index included in metric evaluation
-/// * `eval_stop_idx`             - last frequency index (inclusive) in metric evaluation
+/// * `eval_ranges`               - Vec of (start_idx, stop_idx) per signal port (length = n_signals). Last entry = antenna union band.
 /// * `n_signals`                 - number of signal ports (2, 3, or 4); tunable ports
 ///                                start at index n_signals
 ///
@@ -132,8 +148,7 @@ fn sweep_terminations_parallel<'py>(
     base_s_im: PyReadonlyArray3<'py, f64>,
     term_gammas_re: Vec<PyReadonlyArray2<'py, f64>>,
     term_gammas_im: Vec<PyReadonlyArray2<'py, f64>>,
-    eval_start_idx: usize,
-    eval_stop_idx: usize,
+    eval_ranges: Vec<(usize, usize)>,  // per-signal (start_idx, stop_idx); length = n_signals
     n_signals: usize,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,
@@ -203,7 +218,7 @@ fn sweep_terminations_parallel<'py>(
             }
 
             // s is now (nfreq * n_signals * n_signals)
-            compute_metrics_n(&s, nfreq, n_signals, eval_start_idx, eval_stop_idx)
+            compute_metrics_n(&s, nfreq, n_signals, &eval_ranges)
         })
         .collect();
 
