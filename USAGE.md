@@ -121,6 +121,8 @@ Click the **"Run Cascade"** button.
 
 The tool cascades all loaded files according to your port wiring into a single multi-port network, then populates the Results panel:
 
+After reviewing the plotted result, click **"Export SNP"** to save the cascaded network as a Touchstone file. The button is enabled only after a successful cascade and uses the result network's port count for the extension, such as `.s2p`, `.s3p`, or `.s4p`.
+
 **Smith Chart**
 - Each non-antenna signal port shows a single S-parameter trace over its own frequency band.
 - The antenna port (highest signal index) shows one labeled trace **per band**, using distinct line styles (`—` solid, `--` dashed, `···` dotted, `-·` dash-dot) for easy visual comparison.

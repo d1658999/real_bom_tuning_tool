@@ -167,6 +167,10 @@ class MainWindow(QMainWindow):
         self.run_cascade_action.setEnabled(False)
         toolbar.addAction(self.run_cascade_action)
 
+        self.export_snp_action = QAction("Export SNP", self)
+        self.export_snp_action.setEnabled(False)
+        toolbar.addAction(self.export_snp_action)
+
         self.run_fleet_action = QAction("⚡  Run Fleet", self)
         self.run_fleet_action.setEnabled(False)
         toolbar.addAction(self.run_fleet_action)
@@ -187,6 +191,7 @@ class MainWindow(QMainWindow):
         self.file_panel.files_changed.connect(self._on_files_changed)
         self.port_panel.config_changed.connect(self._on_config_changed)
         self.run_cascade_action.triggered.connect(self._run_cascade)
+        self.export_snp_action.triggered.connect(self._export_result_snp)
         self.run_fleet_action.triggered.connect(self._run_fleet)
         save_action.triggered.connect(self._save_config)
         load_action.triggered.connect(self._load_config)
@@ -196,10 +201,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_files_changed(self):
+        self._invalidate_result()
         self.port_panel.refresh()
         self._update_run_button()
 
     def _on_config_changed(self):
+        self._invalidate_result()
         self._update_run_button()
 
     def _update_run_button(self):
@@ -224,6 +231,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Config Error", str(e))
             return
 
+        self._invalidate_result()
         self.statusBar().showMessage("Running cascade...")
         self.run_cascade_action.setEnabled(False)
 
@@ -239,6 +247,7 @@ class MainWindow(QMainWindow):
 
     def _on_cascade_done(self, net: rf.Network):
         self.app_state.result_network = net
+        self.export_snp_action.setEnabled(True)
         self.result_panel.plot_network(
             net,
             self.app_state.freq_start_ghz,
@@ -258,9 +267,63 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Error during cascade.")
         self._update_run_button()
 
+    def _export_result_snp(self):
+        net = self.app_state.result_network
+        if net is None:
+            QMessageBox.information(
+                self,
+                "No Cascade Result",
+                "Run Cascade first, then export the resulting SNP file.",
+            )
+            return
+
+        ext = f".s{net.nports}p"
+        default_path = self._default_export_path(ext)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Cascade Result",
+            str(default_path),
+            f"Touchstone (*{ext});;All Files (*)",
+        )
+        if not path:
+            return
+
+        export_path = self._normalize_touchstone_path(Path(path), ext)
+        try:
+            net.write_touchstone(
+                filename=export_path.with_suffix("").name,
+                dir=str(export_path.parent),
+                write_z0=True,
+            )
+            self.statusBar().showMessage(f"SNP exported to {export_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
     def _run_fleet(self):
         dialog = _FleetProgressDialog(self.app_state, self)
         dialog.exec_()
+
+    def _invalidate_result(self):
+        if self.app_state.result_network is not None:
+            self.app_state.result_network = None
+            self.export_snp_action.setEnabled(False)
+            self.result_panel.clear()
+
+    def _default_export_path(self, ext: str) -> Path:
+        if self.app_state.files:
+            first_fc = next(iter(self.app_state.files.values()))
+            base_dir = Path(first_fc.file_path).parent
+        else:
+            base_dir = Path.cwd()
+        return base_dir / f"cascade_result{ext}"
+
+    @staticmethod
+    def _normalize_touchstone_path(path: Path, ext: str) -> Path:
+        if not path.suffix:
+            return path.with_suffix(ext)
+        if path.suffix.lower() == ext.lower():
+            return path
+        return path.with_name(f"{path.name}{ext}")
 
     # ------------------------------------------------------------------
     # Config build helper
@@ -366,6 +429,7 @@ class MainWindow(QMainWindow):
             int(k): (float(v[0]), float(v[1]))
             for k, v in raw_sfr.items()
         }
+        self._invalidate_result()
         self.app_state.files.clear()
 
         for file_id, fd in data.get("files", {}).items():

@@ -18,8 +18,9 @@ python -m rf_network_tool.main
    - For capacitor/inductor: pick from BOM dropdown
    - For connect: select target file and port
    - Mark exactly one port as **signal s1** and one as **signal s2**
-3. **Run Cascade** — cascades networks and shows Smith chart, VSWR, IL
-4. **Run Fleet** — sweeps all BOM combinations, 5 agents optimize, Principal selects winner
+3. **Run Cascade** - cascades networks and shows Smith chart, VSWR, IL
+4. **Export SNP** - after reviewing the cascade result, save it as a Touchstone `.sNp` file
+5. **Run Fleet** - sweeps all BOM combinations, 5 agents optimize, Principal selects winner
 
 ## Output (fleet_results/)
 
