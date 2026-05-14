@@ -201,12 +201,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_files_changed(self):
-        self._invalidate_result()
+        self._invalidate_result(clear_plot=True)
         self.port_panel.refresh()
         self._update_run_button()
 
     def _on_config_changed(self):
-        self._invalidate_result()
+        self._invalidate_result(clear_plot=False)
+        self.statusBar().showMessage(
+            "Configuration changed. Previous plot is still shown until Run Cascade."
+        )
         self._update_run_button()
 
     def _update_run_button(self):
@@ -231,7 +234,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Config Error", str(e))
             return
 
-        self._invalidate_result()
+        self._invalidate_result(clear_plot=False)
         self.statusBar().showMessage("Running cascade...")
         self.run_cascade_action.setEnabled(False)
 
@@ -264,7 +267,7 @@ class MainWindow(QMainWindow):
 
     def _on_cascade_error(self, msg: str):
         QMessageBox.critical(self, "Cascade Error", msg)
-        self.statusBar().showMessage("Error during cascade.")
+        self.statusBar().showMessage("Error during cascade. Previous plot is still shown.")
         self._update_run_button()
 
     def _export_result_snp(self):
@@ -303,10 +306,11 @@ class MainWindow(QMainWindow):
         dialog = _FleetProgressDialog(self.app_state, self)
         dialog.exec_()
 
-    def _invalidate_result(self):
-        if self.app_state.result_network is not None:
-            self.app_state.result_network = None
-            self.export_snp_action.setEnabled(False)
+    def _invalidate_result(self, clear_plot: bool = True):
+        """Invalidate the exportable result, optionally clearing the visible plot."""
+        self.app_state.result_network = None
+        self.export_snp_action.setEnabled(False)
+        if clear_plot:
             self.result_panel.clear()
 
     def _default_export_path(self, ext: str) -> Path:
@@ -429,7 +433,7 @@ class MainWindow(QMainWindow):
             int(k): (float(v[0]), float(v[1]))
             for k, v in raw_sfr.items()
         }
-        self._invalidate_result()
+        self._invalidate_result(clear_plot=True)
         self.app_state.files.clear()
 
         for file_id, fd in data.get("files", {}).items():
