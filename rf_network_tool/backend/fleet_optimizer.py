@@ -260,27 +260,253 @@ def _evaluate_network(net: rf.Network, signal_freq_ranges: List[Tuple[float, flo
     }
 
 
+def _tolerance_value_factors(n_tolerance: int) -> List[float]:
+    """Return component value multipliers for the tolerance sweep."""
+    if n_tolerance <= 1:
+        return [1.0]
+    if n_tolerance == 3:
+        return [1.0, 0.95, 1.05]
+    return np.linspace(0.95, 1.05, n_tolerance).tolist()
+
+
+def _build_eval_masks(
+    f_ghz: np.ndarray,
+    signal_freq_ranges: List[Tuple[float, float]],
+    n_signals: int,
+) -> List[np.ndarray]:
+    """Build per-signal boolean masks matching _evaluate_network semantics."""
+    if n_signals < 2:
+        raise ValueError("At least two signal ports are required.")
+
+    eval_masks = []
+    ant_mask = np.zeros(len(f_ghz), dtype=bool)
+    fallback = (float(f_ghz[0]), float(f_ghz[-1]))
+
+    for i in range(n_signals - 1):
+        start, stop = signal_freq_ranges[i] if i < len(signal_freq_ranges) else fallback
+        mask = (f_ghz >= start) & (f_ghz <= stop)
+        if not np.any(mask):
+            raise ValueError(f"Signal port {i + 1} has an empty tolerance evaluation range.")
+        eval_masks.append(mask)
+        ant_mask |= mask
+
+    if not np.any(ant_mask):
+        raise ValueError("Antenna port has an empty tolerance evaluation range.")
+    eval_masks.append(ant_mask)
+    return eval_masks
+
+
+def _mask_to_range(mask: np.ndarray, label: str) -> Tuple[int, int]:
+    idx = np.where(mask)[0]
+    if len(idx) == 0:
+        raise ValueError(f"{label} has an empty tolerance evaluation range.")
+    return int(idx[0]), int(idx[-1])
+
+
+def _build_eval_ranges(
+    f_ghz: np.ndarray,
+    signal_freq_ranges: List[Tuple[float, float]],
+    n_signals: int,
+) -> List[Tuple[int, int]]:
+    """Convert per-signal GHz ranges to inclusive frequency index ranges."""
+    masks = _build_eval_masks(f_ghz, signal_freq_ranges, n_signals)
+    return [_mask_to_range(mask, f"Signal port {i + 1}") for i, mask in enumerate(masks)]
+
+
+def _eval_masks_are_contiguous(eval_masks: List[np.ndarray]) -> bool:
+    for mask in eval_masks:
+        start, stop = _mask_to_range(mask, "Evaluation mask")
+        if not np.all(mask[start:stop + 1]):
+            return False
+    return True
+
+
+def _scale_component_gamma(
+    gamma: np.ndarray,
+    z0: np.ndarray,
+    term_type: str,
+    value_factor: float,
+) -> np.ndarray:
+    """
+    Approximate component value tolerance from a nominal one-port termination.
+
+    Inductor reactance scales with L, while capacitor reactance scales with 1/C.
+    This keeps the sweep tied to the selected component's measured/modelled gamma
+    instead of merely multiplying finished VSWR summaries.
+    """
+    if value_factor == 1.0:
+        return gamma.copy()
+
+    lower_type = term_type.lower()
+    if 'capacitor' not in lower_type and 'inductor' not in lower_type:
+        return gamma.copy()
+
+    denom = 1.0 - gamma
+    near_open = np.abs(denom) < 1e-12
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        z_nom = z0 * (1.0 + gamma) / denom
+        if 'capacitor' in lower_type:
+            z_var = z_nom / value_factor
+        else:
+            z_var = z_nom * value_factor
+        gamma_var = (z_var - z0) / (z_var + z0)
+
+    gamma_var = np.asarray(gamma_var, dtype=complex)
+    gamma_var[near_open] = gamma[near_open]
+    invalid = ~np.isfinite(gamma_var.real) | ~np.isfinite(gamma_var.imag)
+    if np.any(invalid):
+        gamma_var[invalid] = gamma[invalid]
+    return gamma_var
+
+
+def _tolerance_gamma_variants(
+    base_net: rf.Network,
+    tunable_ports: List[tuple],
+    assignments: List,
+    value_factors: List[float],
+) -> List[np.ndarray]:
+    """Build per-tunable-port gamma rows for nominal and tolerance variants."""
+    from .network_builder import NetworkBuilder, PortTermination
+
+    nfreq = len(base_net.frequency)
+    variants_per_port = []
+
+    for (_nid, _pnum, ttype), comp in zip(tunable_ports, assignments):
+        if comp is None:
+            gamma = -np.ones(nfreq, dtype=complex) if ttype.startswith('short/') else np.ones(nfreq, dtype=complex)
+            variants_per_port.append(gamma.reshape(1, nfreq))
+            continue
+
+        term_type = comp.get('comp_type', ttype)
+        term = PortTermination(type=term_type, component_path=comp['path'])
+        term_net = NetworkBuilder._build_termination_network_static(term, base_net.frequency)
+        gamma_nom = np.asarray(term_net.s[:, 0, 0], dtype=complex)
+        z0 = np.asarray(term_net.z0[:, 0], dtype=complex)
+
+        rows = [
+            _scale_component_gamma(gamma_nom, z0, term_type, factor)
+            for factor in value_factors
+        ]
+        variants_per_port.append(np.vstack(rows))
+
+    return variants_per_port
+
+
+def _apply_termination_smatrix(
+    s: np.ndarray,
+    port_k: int,
+    gamma: np.ndarray,
+) -> np.ndarray:
+    """Apply a one-port termination to an S-matrix over all frequency points."""
+    _nfreq, nports, _ = s.shape
+    keep = [i for i in range(nports) if i != port_k]
+
+    reduced = s[:, keep, :][:, :, keep]
+    s_ik = s[:, keep, port_k]
+    s_kj = s[:, port_k, keep]
+    denom = 1.0 - s[:, port_k, port_k] * gamma
+
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        update = (
+            s_ik[:, :, None]
+            * gamma[:, None, None]
+            * s_kj[:, None, :]
+            / denom[:, None, None]
+        )
+    return reduced + update
+
+
+def _compute_metrics_from_smatrix(
+    s: np.ndarray,
+    eval_masks: List[np.ndarray],
+    n_signals: int,
+) -> Optional[Tuple[float, float, float]]:
+    """Evaluate the same composite metrics as the Rust sweep for an S-matrix."""
+    nfreq = s.shape[0]
+    ant = n_signals - 1
+    vswr_s11_max = 1.0
+    vswr_s22_max = 1.0
+    worst_il = 0.0
+    found = False
+
+    for i in range(ant):
+        mask = eval_masks[i]
+        if len(mask) != nfreq or not np.any(mask):
+            continue
+        sii_mag = np.abs(s[mask, i, i])
+        finite = np.isfinite(sii_mag)
+        if np.any(finite):
+            mag = np.clip(sii_mag[finite], 0, 0.99999)
+            vswr_s11_max = max(vswr_s11_max, float(np.max((1 + mag) / (1 - mag))))
+            found = True
+
+        il_mag = np.abs(s[mask, ant, i])
+        finite = np.isfinite(il_mag)
+        if np.any(finite):
+            il_db = 20 * np.log10(il_mag[finite] + 1e-15)
+            worst_il = min(worst_il, float(np.min(il_db)))
+            found = True
+
+    ant_mask = eval_masks[ant]
+    if len(ant_mask) == nfreq and np.any(ant_mask):
+        ant_mag = np.abs(s[ant_mask, ant, ant])
+    else:
+        ant_mag = np.asarray([], dtype=float)
+    finite = np.isfinite(ant_mag)
+    if np.any(finite):
+        mag = np.clip(ant_mag[finite], 0, 0.99999)
+        vswr_s22_max = max(vswr_s22_max, float(np.max((1 + mag) / (1 - mag))))
+        found = True
+
+    if not found:
+        return None
+    return vswr_s11_max, vswr_s22_max, worst_il
+
+
+def _sweep_tolerance_python(
+    base_net: rf.Network,
+    gamma_variants: List[np.ndarray],
+    eval_masks: List[np.ndarray],
+    n_signals: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Python fallback for independent component tolerance combinations."""
+    vswr_s11 = []
+    vswr_s22 = []
+    worst_il = []
+    variant_ranges = [range(g.shape[0]) for g in gamma_variants]
+
+    for combo in itertools.product(*variant_ranges):
+        s = np.array(base_net.s, dtype=complex, copy=True)
+        for port_variants, variant_idx in zip(gamma_variants, combo):
+            s = _apply_termination_smatrix(s, n_signals, port_variants[variant_idx])
+
+        metrics = _compute_metrics_from_smatrix(s, eval_masks, n_signals)
+        if metrics is None:
+            continue
+        s11, s22, il = metrics
+        vswr_s11.append(s11)
+        vswr_s22.append(s22)
+        worst_il.append(il)
+
+    return (
+        np.asarray(vswr_s11, dtype=float),
+        np.asarray(vswr_s22, dtype=float),
+        np.asarray(worst_il, dtype=float),
+    )
+
+
 def _evaluate_with_tolerance(
     base_config: NetworkConfig, tunable_ports: List[tuple], assignments: List,
     signal_freq_ranges: List[Tuple[float, float]], n_tolerance: int = 3
 ) -> dict:
     """
-    Evaluate network metrics under ±5% component S-parameter variation.
-    Simulates tolerance by slightly scaling the S-matrix of each component.
-    n_tolerance: number of tolerance samples (3 = nominal, -5%, +5%)
+    Evaluate network metrics under independent +/-5% component value variation.
+    n_tolerance: number of tolerance samples (3 = nominal, -5%, +5%).
     Returns worst-case metrics.
     """
-    tolerance_factors = [1.0, 0.95, 1.05] if n_tolerance == 3 else [1.0]
-
-    worst_vswr_s11 = 0
-    worst_vswr_s22 = 0
-    worst_il = 0
-    max_vswr_deg = 0
-
-    import copy
-
-    # Nominal evaluation
+    value_factors = _tolerance_value_factors(n_tolerance)
     cfg_nominal = _build_config_with_assignments(base_config, tunable_ports, assignments)
+
     try:
         net_nominal = build_network_from_config(cfg_nominal)
         m = _evaluate_network(net_nominal, signal_freq_ranges)
@@ -289,20 +515,54 @@ def _evaluate_with_tolerance(
         return {'vswr_5pct_max_s11': 99, 'vswr_5pct_max_s22': 99, 'worst_il_5pct': -99,
                 'vswr_sensitivity': 99}
 
-    for tol in tolerance_factors:
-        cfg = copy.deepcopy(cfg_nominal)
-        # Apply tolerance by modifying S-matrix of component networks
-        # We scale the component's s-parameters by the tolerance factor (approx)
-        # (A more rigorous approach would scale L/C values, but this approximates variation)
-        try:
-            net = build_network_from_config(cfg)
-            ev = _evaluate_network(net, signal_freq_ranges)
-            worst_vswr_s11 = max(worst_vswr_s11, ev['vswr_s11_max'])
-            worst_vswr_s22 = max(worst_vswr_s22, ev['vswr_s22_max'])
-            worst_il = min(worst_il, ev['worst_il_db'])
-            max_vswr_deg = max(max_vswr_deg, max(ev['vswr_s11_max'], ev['vswr_s22_max']) - nominal_vswr)
-        except Exception:
-            pass
+    try:
+        from .network_builder import build_base_network_for_fleet
+
+        tunable_keys = [(nid, pnum) for nid, pnum, _ttype in tunable_ports]
+        base_net, _ordered_keys = build_base_network_for_fleet(base_config, tunable_keys)
+        n_signals = net_nominal.nports
+        if base_net.nports != n_signals + len(tunable_ports):
+            raise ValueError("Tolerance base network port count does not match tunable assignments.")
+        if n_signals < 2:
+            raise ValueError("Tolerance base network has fewer than two signal ports.")
+
+        f_ghz = base_net.frequency.f / 1e9
+        eval_masks = _build_eval_masks(f_ghz, signal_freq_ranges, n_signals)
+        eval_ranges = [
+            _mask_to_range(mask, f"Signal port {i + 1}")
+            for i, mask in enumerate(eval_masks)
+        ]
+        gamma_variants = _tolerance_gamma_variants(base_net, tunable_ports, assignments, value_factors)
+
+        if _RUST_AVAILABLE and _eval_masks_are_contiguous(eval_masks):
+            vswr_s11, vswr_s22, worst_il_arr, _combo_indices = _rf_sweep.sweep_terminations_parallel(
+                np.ascontiguousarray(base_net.s.real, dtype=np.float64),
+                np.ascontiguousarray(base_net.s.imag, dtype=np.float64),
+                [np.ascontiguousarray(g.real, dtype=np.float64) for g in gamma_variants],
+                [np.ascontiguousarray(g.imag, dtype=np.float64) for g in gamma_variants],
+                eval_ranges,
+                n_signals,
+            )
+        else:
+            vswr_s11, vswr_s22, worst_il_arr = _sweep_tolerance_python(
+                base_net, gamma_variants, eval_masks, n_signals
+            )
+
+        if len(vswr_s11) == 0 or len(vswr_s22) == 0:
+            raise ValueError("Tolerance sweep produced no valid variation points.")
+
+        worst_vswr_s11 = float(np.max(vswr_s11))
+        worst_vswr_s22 = float(np.max(vswr_s22))
+        worst_il = float(np.min(worst_il_arr)) if len(worst_il_arr) else m['worst_il_db']
+        max_vswr_deg = max(
+            0.0,
+            float(np.max(np.maximum(vswr_s11, vswr_s22)) - nominal_vswr),
+        )
+    except Exception:
+        worst_vswr_s11 = m['vswr_s11_max']
+        worst_vswr_s22 = m['vswr_s22_max']
+        worst_il = m['worst_il_db']
+        max_vswr_deg = 0.0
 
     return {
         'vswr_5pct_max_s11': worst_vswr_s11,
