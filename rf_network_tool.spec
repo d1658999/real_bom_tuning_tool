@@ -21,9 +21,11 @@ VENV_SP    = os.path.join(SPEC_DIR, '.venv', 'Lib', 'site-packages')
 
 RF_SWEEP_DIR = os.path.join(VENV_SP, 'rf_sweep')
 RF_SWEEP_PYD = os.path.join(RF_SWEEP_DIR, 'rf_sweep.cp310-win_amd64.pyd')
+ICON_PATH    = os.path.join(SPEC_DIR, 'rf_network_tool', 'assets', 'rf_network_tool_icon.ico')
 
 # ── Data files bundled into the exe ─────────────────────────────────────────
 datas = []
+datas += [(ICON_PATH, os.path.join('rf_network_tool', 'assets'))]
 
 # scikit-rf ships JSON/yaml data files
 datas += collect_data_files('skrf')
@@ -113,5 +115,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=ICON_PATH,
 )
