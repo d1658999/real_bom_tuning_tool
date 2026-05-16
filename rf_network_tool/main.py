@@ -28,6 +28,20 @@ def _set_windows_app_id():
         pass
 
 
+ICON_ASSET_DIR = "rf_network_tool/assets"
+
+
+def _load_app_icon() -> tuple[QIcon, Path]:
+    icon_path = _resource_path(f"{ICON_ASSET_DIR}/rf_network_tool_icon.ico")
+    icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    if not icon.isNull():
+        return icon, icon_path
+
+    png_path = _resource_path(f"{ICON_ASSET_DIR}/rf_network_tool_icon_256.png")
+    icon = QIcon(str(png_path)) if png_path.exists() else QIcon()
+    return icon, icon_path
+
+
 def _apply_windows_taskbar_icon(window, icon_path: Path):
     if sys.platform != "win32" or not icon_path.exists():
         return
@@ -104,9 +118,8 @@ def _apply_windows_taskbar_icon(window, icon_path: Path):
 def main():
     _set_windows_app_id()
     app = QApplication(sys.argv)
-    icon_path = _resource_path("rf_network_tool/assets/rf_network_tool_icon.ico")
-    icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
-    if icon_path.exists():
+    icon, icon_path = _load_app_icon()
+    if not icon.isNull():
         app.setWindowIcon(icon)
     app.setStyle("Fusion")
     window = MainWindow()
@@ -114,6 +127,7 @@ def main():
         window.setWindowIcon(icon)
     window.show()
     QTimer.singleShot(0, lambda: _apply_windows_taskbar_icon(window, icon_path))
+    QTimer.singleShot(250, lambda: _apply_windows_taskbar_icon(window, icon_path))
     sys.exit(app.exec_())
 
 
