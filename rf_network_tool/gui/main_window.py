@@ -1,4 +1,5 @@
 """Main application window for the RF Network Cascade Tool."""
+import csv
 import json
 from pathlib import Path
 
@@ -170,6 +171,9 @@ class MainWindow(QMainWindow):
         self.export_snp_action = QAction("Export SNP", self)
         self.export_snp_action.setEnabled(False)
         toolbar.addAction(self.export_snp_action)
+        self.export_il_action = QAction("Export IL CSV", self)
+        self.export_il_action.setEnabled(False)
+        toolbar.addAction(self.export_il_action)
 
         self.run_fleet_action = QAction("⚡  Run Fleet", self)
         self.run_fleet_action.setEnabled(False)
@@ -192,6 +196,7 @@ class MainWindow(QMainWindow):
         self.port_panel.config_changed.connect(self._on_config_changed)
         self.run_cascade_action.triggered.connect(self._run_cascade)
         self.export_snp_action.triggered.connect(self._export_result_snp)
+        self.export_il_action.triggered.connect(self._export_insertion_loss)
         self.run_fleet_action.triggered.connect(self._run_fleet)
         save_action.triggered.connect(self._save_config)
         load_action.triggered.connect(self._load_config)
@@ -251,6 +256,7 @@ class MainWindow(QMainWindow):
     def _on_cascade_done(self, net: rf.Network):
         self.app_state.result_network = net
         self.export_snp_action.setEnabled(True)
+        self.export_il_action.setEnabled(True)
         self.result_panel.plot_network(
             net,
             self.app_state.freq_start_ghz,
@@ -302,6 +308,50 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
 
+    def _export_insertion_loss(self):
+        net = self.app_state.result_network
+        if net is None:
+            QMessageBox.information(
+                self,
+                "No Cascade Result",
+                "Run Cascade first, then export the insertion-loss CSV.",
+            )
+            return
+
+        headers, rows = self.result_panel.build_insertion_loss_export_data(
+            net,
+            self.app_state.freq_start_ghz,
+            self.app_state.freq_stop_ghz,
+            signal_freq_ranges=self.app_state.signal_freq_ranges,
+        )
+        if not rows:
+            QMessageBox.information(
+                self,
+                "No Insertion-Loss Data",
+                "No insertion-loss points are available within the configured signal bands.",
+            )
+            return
+
+        default_path = self._default_export_path(".csv").with_name("cascade_insertion_loss.csv")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Insertion Loss CSV",
+            str(default_path),
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+
+        export_path = self._normalize_touchstone_path(Path(path), ".csv")
+        try:
+            with open(export_path, "w", newline="", encoding="utf-8") as csv_file:
+                writer = csv.writer(csv_file)
+                writer.writerow(headers)
+                writer.writerows(rows)
+            self.statusBar().showMessage(f"Insertion-loss CSV exported to {export_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
     def _run_fleet(self):
         dialog = _FleetProgressDialog(self.app_state, self)
         dialog.exec_()
@@ -310,6 +360,7 @@ class MainWindow(QMainWindow):
         """Invalidate the exportable result, optionally clearing the visible plot."""
         self.app_state.result_network = None
         self.export_snp_action.setEnabled(False)
+        self.export_il_action.setEnabled(False)
         if clear_plot:
             self.result_panel.clear()
 

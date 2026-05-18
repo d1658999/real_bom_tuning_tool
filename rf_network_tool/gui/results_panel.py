@@ -75,16 +75,8 @@ class ResultsPanel(QWidget):
 
         COLORS = ["blue", "red", "green", "darkorange"]
 
-        # Build per-port boolean masks (index 0..ant-1 = non-ant; index ant = antenna union)
         sfr = signal_freq_ranges or {}
-        port_masks = []
-        for i in range(ant):
-            start, stop = sfr.get(i + 1, (freq_start, freq_stop))
-            port_masks.append((freqs_ghz >= start) & (freqs_ghz <= stop))
-        ant_mask = np.zeros(len(freqs_ghz), dtype=bool)
-        for m in port_masks:
-            ant_mask |= m
-        port_masks.append(ant_mask)  # index = ant
+        port_masks = self._build_port_masks(freqs_ghz, ant, freq_start, freq_stop, sfr)
 
         # Determine x-axis range for shared axes: use global simulation frequency range
         x_start, x_stop = freq_start, freq_stop
@@ -233,9 +225,62 @@ class ResultsPanel(QWidget):
 
         self.canvas.draw_idle()
 
+    def build_insertion_loss_export_data(
+        self,
+        net: rf.Network,
+        freq_start: float,
+        freq_stop: float,
+        signal_freq_ranges: dict = None,
+    ):
+        """Build CSV-ready insertion-loss data using MHz for the frequency column."""
+        freqs_ghz = net.f / 1e9
+        freqs_mhz = freqs_ghz * 1e3
+        ant = net.nports - 1
+        port_masks = self._build_port_masks(
+            freqs_ghz,
+            ant,
+            freq_start,
+            freq_stop,
+            signal_freq_ranges or {},
+        )
+
+        union_mask = np.zeros(len(freqs_ghz), dtype=bool)
+        il_columns = []
+        for i in range(ant):
+            mask = port_masks[i]
+            union_mask |= mask
+            il_db = np.full(len(freqs_ghz), np.nan)
+            if np.any(mask):
+                s_ant_i = np.clip(np.abs(net.s[mask, ant, i]), 1e-15, None)
+                il_db[mask] = 20 * np.log10(s_ant_i)
+            il_columns.append((f"S{ant+1}{i+1}_il_db", il_db))
+
+        headers = ["frequency_mhz"] + [name for name, _ in il_columns]
+        rows = []
+        for idx in np.where(union_mask)[0]:
+            row = [f"{freqs_mhz[idx]:.6f}"]
+            for _, values in il_columns:
+                row.append("" if np.isnan(values[idx]) else f"{values[idx]:.6f}")
+            rows.append(row)
+        return headers, rows
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_port_masks(freqs_ghz, ant: int, freq_start: float, freq_stop: float, signal_freq_ranges: dict):
+        """Build per-port frequency masks plus the antenna union mask."""
+        port_masks = []
+        for i in range(ant):
+            start, stop = signal_freq_ranges.get(i + 1, (freq_start, freq_stop))
+            port_masks.append((freqs_ghz >= start) & (freqs_ghz <= stop))
+
+        ant_mask = np.zeros(len(freqs_ghz), dtype=bool)
+        for mask in port_masks:
+            ant_mask |= mask
+        port_masks.append(ant_mask)
+        return port_masks
 
     def _draw_smith_background(self, ax):
         """Draw a minimal Smith chart background circle."""
