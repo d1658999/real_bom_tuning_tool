@@ -123,6 +123,8 @@ The tool cascades all loaded files according to your port wiring into a single m
 
 After reviewing the plotted result, click **"Export SNP"** to save the cascaded network as a Touchstone file. The button is enabled only after a successful cascade and uses the result network's port count for the extension, such as `.s2p`, `.s3p`, or `.s4p`.
 
+Click **"Export IL CSV"** to save the plotted insertion-loss traces as CSV. The export uses `frequency_mhz` for the first column and one IL column per antenna-to-signal path, leaving cells blank outside each signal band's configured range.
+
 **Smith Chart**
 - Each non-antenna signal port shows a single S-parameter trace over its own frequency band.
 - The antenna port (highest signal index) shows one labeled trace **per band**, using distinct line styles (`—` solid, `--` dashed, `···` dotted, `-·` dash-dot) for easy visual comparison.
