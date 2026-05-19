@@ -13,6 +13,7 @@ Deployment layout expected by the user:
 """
 
 import os
+import glob
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # ── Paths (relative to this spec file) ─────────────────────────────────────
@@ -20,7 +21,13 @@ SPEC_DIR   = os.path.dirname(os.path.abspath(SPEC))
 VENV_SP    = os.path.join(SPEC_DIR, '.venv', 'Lib', 'site-packages')
 
 RF_SWEEP_DIR = os.path.join(VENV_SP, 'rf_sweep')
-RF_SWEEP_PYD = os.path.join(RF_SWEEP_DIR, 'rf_sweep.cp310-win_amd64.pyd')
+RF_SWEEP_PYD_MATCHES = glob.glob(os.path.join(RF_SWEEP_DIR, 'rf_sweep.cp*-win_amd64.pyd'))
+if not RF_SWEEP_PYD_MATCHES:
+    raise FileNotFoundError(
+        f"No rf_sweep extension found under {RF_SWEEP_DIR}. "
+        "Build rf_sweep before running PyInstaller."
+    )
+RF_SWEEP_PYD = RF_SWEEP_PYD_MATCHES[0]
 ICON_PATH    = os.path.join(SPEC_DIR, 'rf_network_tool', 'assets', 'rf_network_tool_icon.ico')
 
 # ── Data files bundled into the exe ─────────────────────────────────────────
@@ -63,6 +70,7 @@ hiddenimports = [
     'rf_network_tool.gui.results_panel',
     'rf_network_tool.backend',
     'rf_network_tool.backend.fleet_optimizer',
+    'rf_network_tool.backend.smith_targets',
     'rf_network_tool.backend.network_builder',
     'rf_network_tool.backend.bom_parser',
 ]

@@ -7,7 +7,7 @@ REM ─────────────────────────�
 setlocal
 cd /d "%~dp0"
 
-echo [1/3] Checking virtual environment ...
+echo [1/4] Checking virtual environment ...
 if not exist ".venv\Scripts\pyinstaller.exe" (
     echo ERROR: .venv\Scripts\pyinstaller.exe not found.
     echo Please run:  .venv\Scripts\pip install pyinstaller
@@ -15,7 +15,37 @@ if not exist ".venv\Scripts\pyinstaller.exe" (
     exit /b 1
 )
 
-echo [2/3] Running PyInstaller ...
+echo [2/4] Building Rust acceleration module ...
+pushd "rf_network_tool\rf_sweep"
+cargo build --release
+if errorlevel 1 (
+    popd
+    echo.
+    echo ERROR: Rust rf_sweep build failed. See output above.
+    pause
+    exit /b 1
+)
+popd
+
+set "RF_SWEEP_PYD="
+for %%F in (".venv\Lib\site-packages\rf_sweep\rf_sweep.cp*-win_amd64.pyd") do set "RF_SWEEP_PYD=%%~fF"
+if not defined RF_SWEEP_PYD (
+    echo ERROR: rf_sweep .pyd not found in .venv\Lib\site-packages\rf_sweep.
+    echo Please install the rf_sweep package into the virtual environment first.
+    pause
+    exit /b 1
+)
+
+copy /Y "rf_network_tool\rf_sweep\target\release\rf_sweep.dll" "%RF_SWEEP_PYD%" >nul
+if errorlevel 1 (
+    echo.
+    echo ERROR: Could not update %RF_SWEEP_PYD%.
+    echo Close any running rf_network_tool or Python process, then run this build again.
+    pause
+    exit /b 1
+)
+
+echo [3/4] Running PyInstaller ...
 .venv\Scripts\pyinstaller.exe --clean rf_network_tool.spec
 if errorlevel 1 (
     echo.
@@ -25,7 +55,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [3/3] Build complete!
+echo [4/4] Build complete!
 echo Output: dist\rf_network_tool.exe
 echo.
 echo Deploy by placing these items in the same folder:

@@ -21,6 +21,16 @@ class PortConfig:
 
 
 @dataclass
+class SmithTargetConfig:
+    """Optional non-50-ohm Smith target for a signal port over one frequency range."""
+    enabled: bool = False
+    start_ghz: float = 0.0
+    stop_ghz: float = 0.0
+    resistance_ohm: float = 50.0
+    reactance_ohm: float = 0.0
+
+
+@dataclass
 class FileConfig:
     """Configuration for one loaded .snp file."""
     file_id: str       # unique id (file stem)
@@ -39,4 +49,6 @@ class AppState:
     freq_npoints: int = 201
     # per-signal (s1/s2/s3) freq eval bands; key=signal_index(1-based), value=(start_ghz, stop_ghz)
     signal_freq_ranges: Dict[int, Tuple[float, float]] = field(default_factory=dict)
+    # optional per-signal special Smith targets in ohms; default target remains 50+0j outside these ranges
+    special_smith_targets: Dict[int, SmithTargetConfig] = field(default_factory=dict)
     result_network: object = None  # rf.Network or None

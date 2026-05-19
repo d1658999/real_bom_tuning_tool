@@ -13,7 +13,7 @@ from PyQt5.QtGui import QTextCursor
 
 import skrf as rf
 
-from rf_network_tool.gui import AppState, FileConfig, PortConfig
+from rf_network_tool.gui import AppState, FileConfig, PortConfig, SmithTargetConfig
 from rf_network_tool.gui.file_panel import FilePanel
 from rf_network_tool.gui.port_config_panel import PortConfigPanel
 from rf_network_tool.gui.results_panel import ResultsPanel
@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
             self.app_state.freq_start_ghz,
             self.app_state.freq_stop_ghz,
             signal_freq_ranges=self.app_state.signal_freq_ranges,
+            special_smith_targets=self.app_state.special_smith_targets,
         )
         npts = net.nports
         nf   = len(net.f)
@@ -432,6 +433,16 @@ class MainWindow(QMainWindow):
                 str(k): [v[0], v[1]]
                 for k, v in self.app_state.signal_freq_ranges.items()
             },
+            "special_smith_targets": {
+                str(k): {
+                    "enabled": v.enabled,
+                    "start_ghz": v.start_ghz,
+                    "stop_ghz": v.stop_ghz,
+                    "resistance_ohm": v.resistance_ohm,
+                    "reactance_ohm": v.reactance_ohm,
+                }
+                for k, v in self.app_state.special_smith_targets.items()
+            },
             "files": {}
         }
         for file_id, fc in self.app_state.files.items():
@@ -484,6 +495,29 @@ class MainWindow(QMainWindow):
             int(k): (float(v[0]), float(v[1]))
             for k, v in raw_sfr.items()
         }
+        raw_targets = data.get("special_smith_targets", {})
+        self.app_state.special_smith_targets = {}
+        for k, v in raw_targets.items():
+            try:
+                sig_idx = int(k)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(v, (list, tuple)) and len(v) >= 4:
+                self.app_state.special_smith_targets[sig_idx] = SmithTargetConfig(
+                    enabled=True,
+                    start_ghz=float(v[0]),
+                    stop_ghz=float(v[1]),
+                    resistance_ohm=float(v[2]),
+                    reactance_ohm=float(v[3]),
+                )
+            elif isinstance(v, dict):
+                self.app_state.special_smith_targets[sig_idx] = SmithTargetConfig(
+                    enabled=bool(v.get("enabled", True)),
+                    start_ghz=float(v.get("start_ghz", self.app_state.freq_start_ghz)),
+                    stop_ghz=float(v.get("stop_ghz", self.app_state.freq_stop_ghz)),
+                    resistance_ohm=float(v.get("resistance_ohm", 50.0)),
+                    reactance_ohm=float(v.get("reactance_ohm", 0.0)),
+                )
         self._invalidate_result(clear_plot=True)
         self.app_state.files.clear()
 

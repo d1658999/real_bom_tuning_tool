@@ -2,12 +2,12 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QScrollArea, QGroupBox,
     QTableWidget, QTableWidgetItem, QComboBox, QSpinBox, QLineEdit,
-    QLabel, QDoubleSpinBox, QHeaderView, QSizePolicy
+    QLabel, QDoubleSpinBox, QHeaderView, QSizePolicy, QCheckBox
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from typing import Dict, Optional, Tuple
 
-from rf_network_tool.gui import AppState, PortConfig
+from rf_network_tool.gui import AppState, PortConfig, SmithTargetConfig
 from rf_network_tool.backend import bom_parser
 
 
@@ -49,7 +49,11 @@ class PortConfigPanel(QWidget):
         super().__init__(parent)
         self.app_state = app_state
         self._signal_freq_spinboxes: Dict[int, Tuple[QDoubleSpinBox, QDoubleSpinBox]] = {}
+        self._smith_target_widgets: Dict[int, Tuple[
+            QCheckBox, QDoubleSpinBox, QDoubleSpinBox, QDoubleSpinBox, QDoubleSpinBox
+        ]] = {}
         self._refreshing_signal_freq = False
+        self._refreshing_smith_targets = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -98,6 +102,7 @@ class PortConfigPanel(QWidget):
 
         # Per-signal frequency range group
         outer.addWidget(self._create_signal_freq_group())
+        outer.addWidget(self._create_smith_target_group())
 
         # Scrollable area for per-file groups
         self.scroll = QScrollArea()
@@ -111,6 +116,7 @@ class PortConfigPanel(QWidget):
         outer.addWidget(self.scroll, stretch=1)
 
         self._refresh_signal_freq_group()
+        self._refresh_smith_target_group()
 
     # ------------------------------------------------------------------
     # Signal frequency range group
@@ -125,20 +131,34 @@ class PortConfigPanel(QWidget):
         group.setLayout(self._signal_freq_layout)
         return group
 
+    def _create_smith_target_group(self) -> QGroupBox:
+        """Create optional per-signal special Smith target rows."""
+        group = QGroupBox("Special Smith Targets (optional, ohms)")
+        group.setVisible(False)
+        self._smith_target_group = group
+        self._smith_target_layout = QFormLayout()
+        group.setLayout(self._smith_target_layout)
+        return group
+
+    def _current_signal_indices(self) -> set:
+        signal_indices: set = set()
+        for fc in self.app_state.files.values():
+            for pc in fc.ports.values():
+                if pc.term_type == "signal":
+                    signal_indices.add(pc.signal_index)
+        return signal_indices
+
     def _refresh_signal_freq_group(self):
         """Rebuild per-signal freq range rows based on current signal assignments."""
         if self._refreshing_signal_freq:
             return
         self._refreshing_signal_freq = True
         try:
-            signal_indices: set = set()
-            for fc in self.app_state.files.values():
-                for pc in fc.ports.values():
-                    if pc.term_type == "signal":
-                        signal_indices.add(pc.signal_index)
+            signal_indices = self._current_signal_indices()
 
             if len(signal_indices) < 2:
                 self._signal_freq_group.setVisible(False)
+                self._smith_target_group.setVisible(False)
                 return
 
             ant_idx = max(signal_indices)
@@ -210,6 +230,112 @@ class PortConfigPanel(QWidget):
             self._signal_freq_group.setVisible(True)
         finally:
             self._refreshing_signal_freq = False
+        self._refresh_smith_target_group()
+
+    def _refresh_smith_target_group(self):
+        """Rebuild special Smith target rows for all signal ports."""
+        if self._refreshing_smith_targets:
+            return
+        self._refreshing_smith_targets = True
+        try:
+            signal_indices = self._current_signal_indices()
+            if len(signal_indices) < 2:
+                self._smith_target_group.setVisible(False)
+                return
+
+            while self._smith_target_layout.rowCount() > 0:
+                self._smith_target_layout.removeRow(0)
+            self._smith_target_widgets.clear()
+
+            ant_idx = max(signal_indices)
+            for sig_idx in sorted(signal_indices):
+                target = self.app_state.special_smith_targets.get(sig_idx)
+                start_val, stop_val = self._default_target_range(sig_idx, ant_idx)
+                enabled = False
+                resistance = 50.0
+                reactance = 0.0
+                if target is not None:
+                    enabled = target.enabled
+                    start_val = target.start_ghz
+                    stop_val = target.stop_ghz
+                    resistance = target.resistance_ohm
+                    reactance = target.reactance_ohm
+
+                enable_check = QCheckBox("Use")
+                enable_check.setChecked(enabled)
+
+                start_spin = self._target_spin(start_val, " GHz", 0.001, 100.0, 3, 0.1, 92)
+                stop_spin = self._target_spin(stop_val, " GHz", 0.001, 100.0, 3, 0.1, 92)
+                r_spin = self._target_spin(resistance, " ohm", 0.0, 100000.0, 2, 1.0, 95)
+                x_spin = self._target_spin(reactance, " ohm", -100000.0, 100000.0, 2, 1.0, 95)
+
+                self._smith_target_widgets[sig_idx] = (
+                    enable_check, start_spin, stop_spin, r_spin, x_spin
+                )
+
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(4)
+                row_layout.addWidget(enable_check)
+                row_layout.addWidget(QLabel("Range:"))
+                row_layout.addWidget(start_spin)
+                row_layout.addWidget(QLabel("-"))
+                row_layout.addWidget(stop_spin)
+                row_layout.addWidget(QLabel("R:"))
+                row_layout.addWidget(r_spin)
+                row_layout.addWidget(QLabel("X:"))
+                row_layout.addWidget(x_spin)
+                row_layout.addStretch()
+
+                tag = " (ant)" if sig_idx == ant_idx else ""
+                self._smith_target_layout.addRow(f"s{sig_idx}{tag}:", row_widget)
+
+                enable_check.toggled.connect(
+                    lambda _, si=sig_idx: self._on_smith_target_changed(si)
+                )
+                start_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_smith_target_changed(si)
+                )
+                stop_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_smith_target_changed(si)
+                )
+                r_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_smith_target_changed(si)
+                )
+                x_spin.valueChanged.connect(
+                    lambda _, si=sig_idx: self._on_smith_target_changed(si)
+                )
+
+            hint = QLabel("Outside an enabled range, the optimizer still targets 50+0j ohm.")
+            hint.setStyleSheet("color: gray; font-style: italic;")
+            self._smith_target_layout.addRow("", hint)
+            self._smith_target_group.setVisible(True)
+        finally:
+            self._refreshing_smith_targets = False
+
+    def _target_spin(self, value: float, suffix: str, minimum: float, maximum: float,
+                     decimals: int, step: float, width: int) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setDecimals(decimals)
+        spin.setSingleStep(step)
+        spin.setSuffix(suffix)
+        spin.setValue(value)
+        spin.setFixedWidth(width)
+        return spin
+
+    def _default_target_range(self, signal_idx: int, ant_idx: int) -> Tuple[float, float]:
+        if signal_idx != ant_idx:
+            return self.app_state.signal_freq_ranges.get(
+                signal_idx,
+                (self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz),
+            )
+        if self.app_state.signal_freq_ranges:
+            starts = [v[0] for v in self.app_state.signal_freq_ranges.values()]
+            stops = [v[1] for v in self.app_state.signal_freq_ranges.values()]
+            return min(starts), max(stops)
+        return self.app_state.freq_start_ghz, self.app_state.freq_stop_ghz
 
     def _on_signal_freq_changed(self, signal_idx: int):
         start_spin, stop_spin = self._signal_freq_spinboxes[signal_idx]
@@ -217,6 +343,25 @@ class PortConfigPanel(QWidget):
             start_spin.value(), stop_spin.value()
         )
         self._refresh_ant_union_label()
+        self.config_changed.emit()
+        self._refresh_smith_target_group()
+
+    def _on_smith_target_changed(self, signal_idx: int):
+        if self._refreshing_smith_targets:
+            return
+        widgets = self._smith_target_widgets.get(signal_idx)
+        if not widgets:
+            return
+        enable_check, start_spin, stop_spin, r_spin, x_spin = widgets
+        if start_spin.value() > stop_spin.value():
+            stop_spin.setValue(start_spin.value())
+        self.app_state.special_smith_targets[signal_idx] = SmithTargetConfig(
+            enabled=enable_check.isChecked(),
+            start_ghz=start_spin.value(),
+            stop_ghz=stop_spin.value(),
+            resistance_ohm=r_spin.value(),
+            reactance_ohm=x_spin.value(),
+        )
         self.config_changed.emit()
 
     def _refresh_ant_union_label(self):
@@ -246,6 +391,7 @@ class PortConfigPanel(QWidget):
             self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, group)
 
         self._refresh_signal_freq_group()
+        self._refresh_smith_target_group()
 
     # ------------------------------------------------------------------
     # Internal builders
@@ -602,4 +748,5 @@ class PortConfigPanel(QWidget):
             return
         self.app_state.files[file_id].ports[port_num].signal_index = signal_idx
         self._refresh_signal_freq_group()
+        self._refresh_smith_target_group()
         self.config_changed.emit()

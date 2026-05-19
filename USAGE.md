@@ -115,7 +115,20 @@ These ranges control:
 
 ---
 
-### 4.4 Run Cascade
+### 4.4 Set Special Smith Targets *(optional)*
+
+Use **"Special Smith Targets (optional, ohms)"** when a signal port should target a non-50 Ω impedance over only part of its signal band.
+
+- Enable the row for the signal port you want to constrain, such as `s1`.
+- Enter the special frequency range and target impedance in non-normalized ohms, for example `R = 50`, `X = -20` for `50-20j`.
+- Outside the enabled special range, Fleet still targets the normal Smith center (`50+0j`).
+- The Smith chart adds an `S11`, `S22`, `S33`, or `S44` target marker for the enabled rows. Existing traces, VSWR, and IL plots remain unchanged.
+
+Example: if `s1` runs from 3.3 to 5.0 GHz and the special target is enabled from 4.2 to 5.0 GHz at `50-20j`, Fleet scores `s1` against `50+0j` before 4.2 GHz and against `50-20j` from 4.2 to 5.0 GHz.
+
+---
+
+### 4.5 Run Cascade
 
 Click the **"Run Cascade"** button.
 
@@ -128,6 +141,7 @@ Click **"Export IL CSV"** to save the plotted insertion-loss traces as CSV. The 
 **Smith Chart**
 - Each non-antenna signal port shows a single S-parameter trace over its own frequency band.
 - The antenna port (highest signal index) shows one labeled trace **per band**, using distinct line styles (`—` solid, `--` dashed, `···` dotted, `-·` dash-dot) for easy visual comparison.
+- Optional special Smith targets are drawn as `x` markers after converting the non-normalized ohm target to reflection coefficient using 50 Ω reference impedance.
 
 **VSWR**
 - One trace per signal port, plotted over its own frequency band.
@@ -161,9 +175,9 @@ Fleet launches **5 independent agent threads** that each sweep a random subset o
 
 1. Each agent assigns capacitor/inductor values from the BOM to every BOM-terminated port.
 2. The cascade is computed and scored against your signal frequency ranges:
-   - **VSWR < 2.0 bonus** across all signal bands
+   - Minimize target mismatch on the Smith chart; this is the normal distance to center unless a special Smith target is enabled for that frequency range
    - Minimize Insertion Loss
-   - Maximize Return Loss
+   - Track actual VSWR and tolerance sensitivity for production risk
 3. After all 5 agents report their best result, a **Principal agent** compares the scores and selects the overall winner.
 
 **Output files** are written to a `fleet_results\` folder created next to the loaded `.snp` files:

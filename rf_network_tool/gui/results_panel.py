@@ -6,6 +6,12 @@ from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
 import skrf as rf
 
+from rf_network_tool.backend.smith_targets import (
+    coerce_special_smith_targets,
+    format_impedance,
+    impedance_to_gamma,
+)
+
 
 class ResultsPanel(QWidget):
     def __init__(self, parent=None):
@@ -57,7 +63,7 @@ class ResultsPanel(QWidget):
         self.canvas.draw_idle()
 
     def plot_network(self, net: rf.Network, freq_start: float, freq_stop: float,
-                     signal_freq_ranges: dict = None):
+                     signal_freq_ranges: dict = None, special_smith_targets: dict = None):
         """Plot an N-port rf.Network: Smith, VSWR, IL, and text summary.
 
         Convention: antenna port = last port (index N-1).
@@ -67,6 +73,9 @@ class ResultsPanel(QWidget):
         When provided, each signal port's traces are clipped to its own band;
         the antenna port uses the union of all non-antenna bands.
         Falls back to global (freq_start, freq_stop) for any missing entry.
+
+        special_smith_targets: optional {signal_index: target config}. Values are
+        non-normalized impedance targets in ohms and are drawn as Smith markers.
         """
         self._init_axes()
         freqs_ghz = net.f / 1e9
@@ -76,6 +85,7 @@ class ResultsPanel(QWidget):
         COLORS = ["blue", "red", "green", "darkorange"]
 
         sfr = signal_freq_ranges or {}
+        targets = coerce_special_smith_targets(special_smith_targets or {}, n)
         port_masks = self._build_port_masks(freqs_ghz, ant, freq_start, freq_stop, sfr)
 
         # Determine x-axis range for shared axes: use global simulation frequency range
@@ -113,6 +123,19 @@ class ResultsPanel(QWidget):
                                   linestyle="--", color="green",
                                   linewidth=1, label="VSWR=2")
         self.ax_smith.add_patch(circle)
+        for sig_idx, (start, stop, resistance, reactance) in targets.items():
+            gamma = impedance_to_gamma(resistance, reactance)
+            color = COLORS[(sig_idx - 1) % len(COLORS)]
+            self.ax_smith.plot(
+                [gamma.real], [gamma.imag],
+                marker="x", markersize=8, markeredgewidth=1.6,
+                color=color, linestyle="None",
+                label=(
+                    f"S{sig_idx}{sig_idx} target "
+                    f"{format_impedance(resistance, reactance)} "
+                    f"[{start:.2f}-{stop:.2f}]"
+                ),
+            )
         self.ax_smith.legend(fontsize=7, loc="upper right")
         port_labels = "/".join(f"S{i+1}{i+1}" for i in range(n))
         self.ax_smith.set_title(f"Smith Chart ({port_labels})", fontsize=9)
@@ -206,6 +229,16 @@ class ResultsPanel(QWidget):
                 lines.append(f"VSWR(S{i+1}{i+1}){tag}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
 
         lines.append("")
+        if targets:
+            lines.append("Special Smith targets:")
+            for sig_idx, (start, stop, resistance, reactance) in sorted(targets.items()):
+                gamma = impedance_to_gamma(resistance, reactance)
+                lines.append(
+                    f"S{sig_idx}{sig_idx}: {format_impedance(resistance, reactance)}"
+                    f" -> gamma={gamma.real:+.3f}{gamma.imag:+.3f}j"
+                    f" [{start:.3f}-{stop:.3f} GHz]"
+                )
+            lines.append("")
         for i, (il_db, lbl) in enumerate(zip(il_values, il_labels)):
             s_i, e_i = sfr.get(i + 1, (freq_start, freq_stop))
             if len(il_db) > 0:
