@@ -1,0 +1,265 @@
+{
+  "freq_start_ghz": 0.5,
+  "freq_stop_ghz": 2.7,
+  "freq_npoints": 201,
+  "signal_freq_ranges": {
+    "1": [
+      0.6,
+      0.96
+    ],
+    "2": [
+      1.4,
+      2.7
+    ]
+  },
+  "files": {
+    "dpx252690dt-5258b1_ver_1_0_n_20240417": {
+      "file_path": "G:/My Drive/1_PJ/15_ASK5/WGO_ANT1_SIM/dpx252690dt-5258b1_ver_1_0_n_20240417.s3p",
+      "display_name": "dpx252690dt-5258b1_ver_1_0_n_20240417.s3p",
+      "nports": 3,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "WGO5_Ant1_2",
+          "connect_to_port": 5,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "WGO5_Ant1_2",
+          "connect_to_port": 11,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "3": {
+          "label": "Port 3",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "WGO5_Ant1_2",
+          "connect_to_port": 6,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    },
+    "WGO5_Ant1_2": {
+      "file_path": "G:/My Drive/1_PJ/15_ASK5/WGO_ANT1_SIM/WGO5_Ant1_2.s15p",
+      "display_name": "WGO5_Ant1_2.s15p",
+      "nports": 15,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "signal",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 3,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "open/ind/cap",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.2,
+          "ind_max_nh": 10.0,
+          "cap_min_pf": 0.2,
+          "cap_max_pf": 10.0
+        },
+        "3": {
+          "label": "Port 3",
+          "term_type": "open/ind/cap",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.2,
+          "ind_max_nh": 10.0,
+          "cap_min_pf": 0.2,
+          "cap_max_pf": 10.0
+        },
+        "4": {
+          "label": "Port 4",
+          "term_type": "open/ind/cap",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.2,
+          "ind_max_nh": 10.0,
+          "cap_min_pf": 0.2,
+          "cap_max_pf": 10.0
+        },
+        "5": {
+          "label": "Port 5",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "dpx252690dt-5258b1_ver_1_0_n_20240417",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "6": {
+          "label": "Port 6",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "dpx252690dt-5258b1_ver_1_0_n_20240417",
+          "connect_to_port": 3,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "7": {
+          "label": "Port 7",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "8": {
+          "label": "Port 8",
+          "term_type": "capacitor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Capacitors_BOM\\GJM0225C1E100GB01_DC0V_25degC_series.s2p",
+          "component_name": "10pF - GJM0225C1E100GB01_DC0V_25degC_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "9": {
+          "label": "Port 9",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "10": {
+          "label": "Port 10",
+          "term_type": "signal",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 2,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "11": {
+          "label": "Port 11",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "dpx252690dt-5258b1_ver_1_0_n_20240417",
+          "connect_to_port": 2,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "12": {
+          "label": "Port 12",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "13": {
+          "label": "Port 13",
+          "term_type": "capacitor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Capacitors_BOM\\GJM0225C1E100GB01_DC0V_25degC_series.s2p",
+          "component_name": "10pF - GJM0225C1E100GB01_DC0V_25degC_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "14": {
+          "label": "Port 14",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "15": {
+          "label": "Port 15",
+          "term_type": "signal",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    }
+  }
+}

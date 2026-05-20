@@ -1,0 +1,490 @@
+{
+  "freq_start_ghz": 3.3,
+  "freq_stop_ghz": 5.0,
+  "freq_npoints": 201,
+  "signal_freq_ranges": {
+    "1": [
+      3.3,
+      5.0
+    ]
+  },
+  "files": {
+    "ASK_SLB_0403_ASK_SLB_0403_ANT6_7": {
+      "file_path": "C:/Users/pricewu/Documents/SideProject/real_bom_tuning_tool/ASK_SLB_0403_ASK_SLB_0403_ANT6_7.s10p",
+      "display_name": "ASK_SLB_0403_ASK_SLB_0403_ANT6_7.s10p",
+      "nports": 10,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 5.0,
+          "ind_max_nh": 16.0,
+          "cap_min_pf": 0.2,
+          "cap_max_pf": 1.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 5.0,
+          "ind_max_nh": 16.0,
+          "cap_min_pf": 0.2,
+          "cap_max_pf": 1.0
+        },
+        "3": {
+          "label": "Port 3",
+          "term_type": "inductor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Inductors_BOM\\LQP02TQ0N2B02_series.s2p",
+          "component_name": "0.2nH - LQP02TQ0N2B02_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.20000000000000004,
+          "ind_max_nh": 0.6,
+          "cap_min_pf": 1.0,
+          "cap_max_pf": 10.0
+        },
+        "4": {
+          "label": "Port 4",
+          "term_type": "signal",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "5": {
+          "label": "Port 5",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "[confidential]MLF08_20GHz_011520_ANT6_SLB",
+          "connect_to_port": 2,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "6": {
+          "label": "Port 6",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "7": {
+          "label": "Port 7",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "8": {
+          "label": "Port 8",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "9": {
+          "label": "Port 9",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "10": {
+          "label": "Port 10",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    },
+    "Cubs_RJF_DK2p55": {
+      "file_path": "C:/Users/pricewu/Documents/SideProject/real_bom_tuning_tool/Cubs_RJF_DK2p55.s4p",
+      "display_name": "Cubs_RJF_DK2p55.s4p",
+      "nports": 4,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "[confidential]MLF08_20GHz_011520_ANT6_SLB",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "[confidential]MLF08_20GHz_011520_ANT6_CLB",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "3": {
+          "label": "Port 3",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "4": {
+          "label": "Port 4",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    },
+    "[confidential]MLF08_20GHz_011520_ANT6_CLB": {
+      "file_path": "C:/Users/pricewu/Documents/SideProject/real_bom_tuning_tool/[confidential]MLF08_20GHz_011520_ANT6_CLB.s2p",
+      "display_name": "[confidential]MLF08_20GHz_011520_ANT6_CLB.s2p",
+      "nports": 2,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "Cubs_RJF_DK2p55",
+          "connect_to_port": 2,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "G561-19063-02_clb_cert_G561-19063-02_clb_cert_cutout",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    },
+    "[confidential]MLF08_20GHz_011520_ANT6_SLB": {
+      "file_path": "C:/Users/pricewu/Documents/SideProject/real_bom_tuning_tool/[confidential]MLF08_20GHz_011520_ANT6_SLB.s2p",
+      "display_name": "[confidential]MLF08_20GHz_011520_ANT6_SLB.s2p",
+      "nports": 2,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "Cubs_RJF_DK2p55",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "ASK_SLB_0403_ASK_SLB_0403_ANT6_7",
+          "connect_to_port": 5,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    },
+    "G561-19063-02_clb_cert_G561-19063-02_clb_cert_cutout": {
+      "file_path": "C:/Users/pricewu/Documents/SideProject/real_bom_tuning_tool/G561-19063-02_clb_cert_G561-19063-02_clb_cert_cutout.s16p",
+      "display_name": "G561-19063-02_clb_cert_G561-19063-02_clb_cert_cutout.s16p",
+      "nports": 16,
+      "ports": {
+        "1": {
+          "label": "Port 1",
+          "term_type": "connect",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "[confidential]MLF08_20GHz_011520_ANT6_CLB",
+          "connect_to_port": 2,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "2": {
+          "label": "Port 2",
+          "term_type": "capacitor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Capacitors_BOM\\GJM0225C1E1R3BB01_DC0V_25degC_series.s2p",
+          "component_name": "1.3pF - GJM0225C1E1R3BB01_DC0V_25degC_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "3": {
+          "label": "Port 3",
+          "term_type": "inductor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Inductors_BOM\\LQP02TQ6N2H02_series.s2p",
+          "component_name": "6.2nH - LQP02TQ6N2H02_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "4": {
+          "label": "Port 4",
+          "term_type": "short",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "5": {
+          "label": "Port 5",
+          "term_type": "signal",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 2,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "6": {
+          "label": "Port 6",
+          "term_type": "capacitor",
+          "component_path": "C:\\Users\\pricewu\\Documents\\SideProject\\real_bom_tuning_tool\\Capacitors_BOM\\GJM0225C1ER20WB01_DC0V_25degC_series.s2p",
+          "component_name": "0.2pF - GJM0225C1ER20WB01_DC0V_25degC_series",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "7": {
+          "label": "Port 7",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "8": {
+          "label": "Port 8",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "9": {
+          "label": "Port 9",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "10": {
+          "label": "Port 10",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "11": {
+          "label": "Port 11",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "12": {
+          "label": "Port 12",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "13": {
+          "label": "Port 13",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "14": {
+          "label": "Port 14",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "15": {
+          "label": "Port 15",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        },
+        "16": {
+          "label": "Port 16",
+          "term_type": "open",
+          "component_path": "",
+          "component_name": "",
+          "connect_to_file": "",
+          "connect_to_port": 1,
+          "signal_index": 1,
+          "ind_min_nh": 0.0,
+          "ind_max_nh": 10000.0,
+          "cap_min_pf": 0.0,
+          "cap_max_pf": 10000.0
+        }
+      }
+    }
+  }
+}
