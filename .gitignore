@@ -1,8 +1,9 @@
-fleet_results*
-
-# PyInstaller build artefacts
-build/
-dist/
-*.spec.bak
-__pycache__/
+/target/
+/dist/
+/rf_network_tool_rust/target/
+/rf_network_tool_rust/dist/
+/fleet_results/
+/fleet_results_smoke/
 *.pyc
+__pycache__/
+*.zip
