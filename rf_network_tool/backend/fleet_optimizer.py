@@ -1075,8 +1075,25 @@ class FleetOptimizer:
 
         elif agent_id == 5:
             name = "Agent 5 - Min IL"
-            strategy = "Minimize insertion loss (maximize |S21|)"
-            best = max(all_results, key=lambda r: r['worst_il_db'])
+            strategy = "Minimize insertion loss after meeting the active Smith target"
+            # IL-only selection can choose a high-transmission candidate that misses the
+            # requested special Smith target. Keep Agent 5 transmission-focused, but
+            # constrain it to candidates near the best achievable target mismatch first.
+            target_floor = min(
+                r.get('target_error_max', max(r['vswr_s11_max'], r['vswr_s22_max']))
+                for r in all_results
+            )
+            target_threshold = target_floor + max(0.005, 0.15 * target_floor)
+            target_matched = [
+                r for r in all_results
+                if r.get('target_error_max', max(r['vswr_s11_max'], r['vswr_s22_max'])) <= target_threshold
+            ]
+            if not target_matched:
+                target_matched = all_results
+            best = max(target_matched, key=lambda r: (
+                r['worst_il_db'],
+                -r.get('target_error_max', max(r['vswr_s11_max'], r['vswr_s22_max']))
+            ))
 
         else:
             raise ValueError(f"Unknown agent_id {agent_id}")
