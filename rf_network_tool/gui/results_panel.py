@@ -5,6 +5,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationTool
 from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
 import skrf as rf
+from smith_chart_utils import draw_smith_chart_background
 
 from rf_network_tool.backend.smith_targets import (
     coerce_special_smith_targets,
@@ -36,9 +37,9 @@ class ResultsPanel(QWidget):
     def _init_axes(self):
         self.fig.clear()
         self.ax_smith = self.fig.add_subplot(2, 2, 1)
-        self.ax_vswr  = self.fig.add_subplot(2, 2, 2)
-        self.ax_il    = self.fig.add_subplot(2, 2, 3)
-        self.ax_text  = self.fig.add_subplot(2, 2, 4)
+        self.ax_vswr = self.fig.add_subplot(2, 2, 2)
+        self.ax_il = self.fig.add_subplot(2, 2, 3)
+        self.ax_text = self.fig.add_subplot(2, 2, 4)
         self.ax_text.axis("off")
 
     # ------------------------------------------------------------------
@@ -86,7 +87,8 @@ class ResultsPanel(QWidget):
 
         sfr = signal_freq_ranges or {}
         targets = coerce_special_smith_targets(special_smith_targets or {}, n)
-        port_masks = self._build_port_masks(freqs_ghz, ant, freq_start, freq_stop, sfr)
+        port_masks = self._build_port_masks(
+            freqs_ghz, ant, freq_start, freq_stop, sfr)
 
         # Determine x-axis range for shared axes: use global simulation frequency range
         x_start, x_stop = freq_start, freq_stop
@@ -109,7 +111,8 @@ class ResultsPanel(QWidget):
                     lbl = f"S{ant+1}{ant+1}[s{band_i+1}:{s_i:.2f}\u2013{e_i:.2f}]"
                     self.ax_smith.plot(s_ant.real, s_ant.imag,
                                        color=color,
-                                       linestyle=BAND_STYLES[band_i % len(BAND_STYLES)],
+                                       linestyle=BAND_STYLES[band_i % len(
+                                           BAND_STYLES)],
                                        label=lbl, linewidth=1.4)
             else:
                 mask = port_masks[i]
@@ -120,8 +123,8 @@ class ResultsPanel(QWidget):
 
         vswr2_r = 1.0 / 3.0
         circle = mpatches.Circle((0, 0), vswr2_r, fill=False,
-                                  linestyle="--", color="green",
-                                  linewidth=1, label="VSWR=2")
+                                 linestyle="--", color="green",
+                                 linewidth=1, label="VSWR=2")
         self.ax_smith.add_patch(circle)
         for sig_idx, (start, stop, resistance, reactance) in targets.items():
             gamma = impedance_to_gamma(resistance, reactance)
@@ -168,7 +171,8 @@ class ResultsPanel(QWidget):
                 freq_i = freqs_ghz[mask]
                 s_mag = np.clip(np.abs(net.s[mask, i, i]), 0, 0.9999)
                 vswr_i = (1 + s_mag) / (1 - s_mag)
-                vswr_maxes.append(float(np.max(vswr_i)) if len(vswr_i) > 0 else 0.0)
+                vswr_maxes.append(float(np.max(vswr_i))
+                                  if len(vswr_i) > 0 else 0.0)
                 self.ax_vswr.plot(freq_i, vswr_i, color=color,
                                   label=f"VSWR(S{i+1}{i+1})", linewidth=1)
 
@@ -226,7 +230,8 @@ class ResultsPanel(QWidget):
                     f"  [{s_i:.3f}\u2013{e_i:.3f} GHz]"
                 )
             else:
-                lines.append(f"VSWR(S{i+1}{i+1}){tag}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
+                lines.append(
+                    f"VSWR(S{i+1}{i+1}){tag}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
 
         lines.append("")
         if targets:
@@ -247,7 +252,8 @@ class ResultsPanel(QWidget):
                 )
                 lines.append(f"Avg {lbl}: {float(np.mean(il_db)):.2f} dB")
             else:
-                lines.append(f"{lbl}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
+                lines.append(
+                    f"{lbl}: no data in [{s_i:.3f}\u2013{e_i:.3f} GHz]")
 
         summary = "\n".join(lines)
         self.ax_text.set_title("Summary", fontsize=9)
@@ -293,7 +299,8 @@ class ResultsPanel(QWidget):
         for idx in np.where(union_mask)[0]:
             row = [f"{freqs_mhz[idx]:.6f}"]
             for _, values in il_columns:
-                row.append("" if np.isnan(values[idx]) else f"{values[idx]:.6f}")
+                row.append("" if np.isnan(
+                    values[idx]) else f"{values[idx]:.6f}")
             rows.append(row)
         return headers, rows
 
@@ -306,7 +313,8 @@ class ResultsPanel(QWidget):
         """Build per-port frequency masks plus the antenna union mask."""
         port_masks = []
         for i in range(ant):
-            start, stop = signal_freq_ranges.get(i + 1, (freq_start, freq_stop))
+            start, stop = signal_freq_ranges.get(
+                i + 1, (freq_start, freq_stop))
             port_masks.append((freqs_ghz >= start) & (freqs_ghz <= stop))
 
         ant_mask = np.zeros(len(freqs_ghz), dtype=bool)
@@ -316,11 +324,5 @@ class ResultsPanel(QWidget):
         return port_masks
 
     def _draw_smith_background(self, ax):
-        """Draw a minimal Smith chart background circle."""
-        theta = np.linspace(0, 2 * np.pi, 360)
-        ax.plot(np.cos(theta), np.sin(theta), "k", linewidth=0.8)
-        ax.axhline(0, color="k", linewidth=0.5)
-        ax.set_xlim(-1.1, 1.1)
-        ax.set_ylim(-1.1, 1.1)
-        ax.set_aspect("equal")
-        ax.grid(True, linewidth=0.3)
+        """Draw a scikit-rf Smith chart background."""
+        draw_smith_chart_background(ax)

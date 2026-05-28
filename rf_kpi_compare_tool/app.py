@@ -42,6 +42,7 @@ from rf_kpi_compare_tool.comparison import (
     compare_networks,
     export_excel_report,
 )
+from smith_chart_utils import draw_smith_chart_background
 
 
 COLORS = [
@@ -458,17 +459,8 @@ class CompareMainWindow(QMainWindow):
         axis.tick_params(labelsize=8)
 
     def _draw_smith_background(self, axis, title: str) -> None:
-        theta = np.linspace(0.0, 2.0 * np.pi, 360)
-        axis.plot(np.cos(theta), np.sin(theta), color="black", linewidth=0.8)
-        axis.axhline(0.0, color="black", linewidth=0.4)
-        axis.axvline(0.0, color="black", linewidth=0.4)
-        axis.set_xlim(-1.1, 1.1)
-        axis.set_ylim(-1.1, 1.1)
-        axis.set_aspect("equal", adjustable="box")
-        axis.grid(True, linewidth=0.3)
+        draw_smith_chart_background(axis, title)
         axis.set_title(title, fontsize=10)
-        axis.set_xlabel("Real", fontsize=8)
-        axis.set_ylabel("Imag", fontsize=8)
         axis.tick_params(labelsize=7)
 
     def _populate_metrics_table(self, result: ComparisonResult) -> None:
