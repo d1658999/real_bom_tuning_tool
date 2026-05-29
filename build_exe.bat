@@ -7,7 +7,16 @@ REM ─────────────────────────�
 setlocal
 cd /d "%~dp0"
 
+set "VENV_PYTHON=%CD%\.venv\Scripts\python.exe"
+
 echo [1/4] Checking virtual environment ...
+if not exist "%VENV_PYTHON%" (
+    echo ERROR: %VENV_PYTHON% not found.
+    echo Please create the virtual environment with Python 3.10 first.
+    pause
+    exit /b 1
+)
+
 if not exist ".venv\Scripts\pyinstaller.exe" (
     echo ERROR: .venv\Scripts\pyinstaller.exe not found.
     echo Please run:  .venv\Scripts\pip install pyinstaller
@@ -15,8 +24,19 @@ if not exist ".venv\Scripts\pyinstaller.exe" (
     exit /b 1
 )
 
+"%VENV_PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 10) else 1)"
+if errorlevel 1 (
+    echo ERROR: .venv must use Python 3.10.x for rf_sweep and PyInstaller.
+    echo Current version:
+    "%VENV_PYTHON%" -V
+    echo Recreate the virtual environment with Python 3.10, then reinstall requirements.
+    pause
+    exit /b 1
+)
+
 echo [2/4] Building Rust acceleration module ...
 pushd "rf_network_tool\rf_sweep"
+set "PYO3_PYTHON=%VENV_PYTHON%"
 cargo build --release
 if errorlevel 1 (
     popd

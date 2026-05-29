@@ -8,12 +8,12 @@ This guide walks through building the `rf_network_tool` Windows executable from 
 
 Install all of the following before starting.
 
-| Tool | Version | Notes |
-|---|---|---|
-| **Python** | **3.10.x** (exact) | The Rust extension `.pyd` filename encodes the CPython version (`cp310`). Using 3.11+ will break the build. |
-| **Rust toolchain** | stable (latest) | Install via `rustup` |
-| **MSVC C++ Build Tools** | VS 2019 or 2022 | Required by the Rust linker on Windows |
-| **Git** | any recent | Optional, but recommended for cloning |
+| Tool                     | Version            | Notes                                                                                                       |
+| ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| **Python**               | **3.10.x** (exact) | The Rust extension `.pyd` filename encodes the CPython version (`cp310`). Using 3.11+ will break the build. |
+| **Rust toolchain**       | stable (latest)    | Install via `rustup`                                                                                        |
+| **MSVC C++ Build Tools** | VS 2019 or 2022    | Required by the Rust linker on Windows                                                                      |
+| **Git**                  | any recent         | Optional, but recommended for cloning                                                                       |
 
 ### Python 3.10
 
@@ -137,9 +137,11 @@ cmd /c build_exe.bat
 ```
 
 The script performs three phases:
-1. Checks that `.venv\Scripts\pyinstaller.exe` exists
-2. Runs `pyinstaller --clean rf_network_tool.spec`
-3. Reports success and the output path
+1. Checks that `.venv` exists, that it is using Python 3.10.x, and that `pyinstaller` is installed
+2. Rebuilds `rf_sweep` with `cargo build --release` while pinning PyO3 to `.venv\Scripts\python.exe`
+3. Copies the fresh `rf_sweep.dll` over the installed `rf_sweep.cp310-win_amd64.pyd`
+4. Runs `pyinstaller --clean rf_network_tool.spec`
+5. Reports success and the output path
 
 **Expected duration:** ~5 minutes on first run (PyInstaller collects files + UPX compression is applied).  
 **Output:** `dist\rf_network_tool.exe` (~79 MB, single file, no console window)
@@ -184,6 +186,15 @@ Launch `rf_network_tool.exe` directly — **no Python, Rust, or any other instal
 2. Re-run `maturin develop --release` from `rf_network_tool\rf_sweep\`
 3. Re-run `build_exe.bat`
 
+### PyO3 picks Python 3.14 instead of the venv
+
+**Symptom:** `cargo build --release` fails with a message like *"the configured Python interpreter version (3.14) is newer than PyO3's maximum supported version (3.13)"*.  
+**Cause:** PyO3 discovered a newer system Python instead of the project's `.venv`.  
+**Fix:**
+1. Confirm the venv uses Python 3.10: `.venv\Scripts\python --version`
+2. Run `build_exe.bat` from the project root so it pins `PYO3_PYTHON` to `.venv\Scripts\python.exe`
+3. If the error persists, recreate `.venv` with Python 3.10 and reinstall requirements
+
 ---
 
 ### PyInstaller DEPRECATION warning about `.venv\Lib\site-packages` in `pathex`
@@ -214,9 +225,9 @@ The exe is built with `console=False`, so crash output is not visible. To see er
 
 ## Rebuilding After Code Changes
 
-| What changed | Steps required |
-|---|---|
-| **Python only** (`.py` files) | Re-run `cmd /c build_exe.bat` |
+| What changed                           | Steps required                                                                                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Python only** (`.py` files)          | Re-run `cmd /c build_exe.bat`                                                                   |
 | **Rust code** (`lib.rs`, `Cargo.toml`) | Run `maturin develop --release` (from `rf_network_tool\rf_sweep\`), then re-run `build_exe.bat` |
-| **New Python dependency** | `.venv\Scripts\pip install <package>`, update `requirements.txt`, then re-run `build_exe.bat` |
-| **PyInstaller spec changes** | Edit `rf_network_tool.spec`, then re-run `build_exe.bat` |
+| **New Python dependency**              | `.venv\Scripts\pip install <package>`, update `requirements.txt`, then re-run `build_exe.bat`   |
+| **PyInstaller spec changes**           | Edit `rf_network_tool.spec`, then re-run `build_exe.bat`                                        |
