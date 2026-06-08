@@ -136,8 +136,8 @@ def compare_networks(
     selected_stop_ghz: float,
 ) -> ComparisonResult:
     items = list(networks)
-    if len(items) < 2:
-        raise ValueError("Select at least two valid .s2p files to compare.")
+    if len(items) < 1:
+        raise ValueError("Select at least one valid .s2p file to compare.")
 
     common_start_ghz, common_stop_ghz = common_frequency_range(items)
     _validate_frequency_range(

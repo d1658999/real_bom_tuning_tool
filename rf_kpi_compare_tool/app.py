@@ -279,10 +279,11 @@ class CompareMainWindow(QMainWindow):
             self.stop_freq_spin.setEnabled(False)
             self.use_common_range_button.setEnabled(False)
             self.compare_button.setEnabled(False)
+            self.compare_button.setText("Compare")
             self.export_pdf_button.setEnabled(False)
             self.export_excel_button.setEnabled(False)
             self._clear_results(
-                "Add at least two .s2p files to start comparing.")
+                "Add at least one .s2p file to start.")
             return
 
         range_start, range_stop = shared_range
@@ -304,13 +305,21 @@ class CompareMainWindow(QMainWindow):
             self.start_freq_spin.setValue(range_start)
             self.stop_freq_spin.setValue(range_stop)
 
-        can_compare = len(self.loaded_networks) >= 2
+        num_files = len(self.loaded_networks)
+        can_compare = num_files >= 1
         self.compare_button.setEnabled(can_compare)
         self.export_pdf_button.setEnabled(False)
         self.export_excel_button.setEnabled(False)
-        self._clear_results(
-            "Choose a valid frequency window inside the shared range, then click Compare."
-        )
+        if num_files == 1:
+            self.compare_button.setText("Review")
+            self._clear_results(
+                "Choose a valid frequency window, then click Review."
+            )
+        else:
+            self.compare_button.setText("Compare")
+            self._clear_results(
+                "Choose a valid frequency window inside the shared range, then click Compare."
+            )
 
     def _shared_range_for_ui(self) -> tuple[float, float] | None:
         if not self.loaded_networks:
@@ -344,9 +353,12 @@ class CompareMainWindow(QMainWindow):
         self._populate_differences_table(result)
         self.export_pdf_button.setEnabled(True)
         self.export_excel_button.setEnabled(True)
+        file_count = len(result.file_order)
+        verb = "Reviewed" if file_count == 1 else "Compared"
+        file_word = "file" if file_count == 1 else "files"
         self.statusBar().showMessage(
             (
-                f"Compared {len(result.file_order)} files across "
+                f"{verb} {file_count} {file_word} across "
                 f"{result.selected_start_ghz:.6f} - {result.selected_stop_ghz:.6f} GHz."
             ),
             5000,
