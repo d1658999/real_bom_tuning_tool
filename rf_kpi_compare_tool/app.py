@@ -129,14 +129,22 @@ class CompareMainWindow(QMainWindow):
         range_layout.addWidget(self.use_common_range_button)
         control_layout.addWidget(range_group)
 
-        action_row = QHBoxLayout()
+        action_layout = QVBoxLayout()
+        row1 = QHBoxLayout()
         self.compare_button = QPushButton("Compare", self)
+        self.export_s21_button = QPushButton("Export S21 (CSV)", self)
+        row1.addWidget(self.compare_button)
+        row1.addWidget(self.export_s21_button)
+        
+        row2 = QHBoxLayout()
         self.export_pdf_button = QPushButton("Export PDF", self)
         self.export_excel_button = QPushButton("Export Excel", self)
-        action_row.addWidget(self.compare_button)
-        action_row.addWidget(self.export_pdf_button)
-        action_row.addWidget(self.export_excel_button)
-        control_layout.addLayout(action_row)
+        row2.addWidget(self.export_pdf_button)
+        row2.addWidget(self.export_excel_button)
+        
+        action_layout.addLayout(row1)
+        action_layout.addLayout(row2)
+        control_layout.addLayout(action_layout)
 
         self.hint_label = QLabel("Only valid 2-port .s2p files are accepted.")
         self.hint_label.setWordWrap(True)
@@ -186,6 +194,7 @@ class CompareMainWindow(QMainWindow):
         self.compare_button.clicked.connect(self._run_comparison)
         self.export_pdf_button.clicked.connect(self._export_pdf)
         self.export_excel_button.clicked.connect(self._export_excel)
+        self.export_s21_button.clicked.connect(self._export_s21)
 
     def _create_table(self, headers: list[str]) -> QTableWidget:
         table = QTableWidget(0, len(headers), self)
@@ -282,6 +291,7 @@ class CompareMainWindow(QMainWindow):
             self.compare_button.setText("Compare")
             self.export_pdf_button.setEnabled(False)
             self.export_excel_button.setEnabled(False)
+            self.export_s21_button.setEnabled(False)
             self._clear_results(
                 "Add at least one .s2p file to start.")
             return
@@ -310,6 +320,7 @@ class CompareMainWindow(QMainWindow):
         self.compare_button.setEnabled(can_compare)
         self.export_pdf_button.setEnabled(False)
         self.export_excel_button.setEnabled(False)
+        self.export_s21_button.setEnabled(False)
         if num_files == 1:
             self.compare_button.setText("Review")
             self._clear_results(
@@ -354,6 +365,7 @@ class CompareMainWindow(QMainWindow):
         self.export_pdf_button.setEnabled(True)
         self.export_excel_button.setEnabled(True)
         file_count = len(result.file_order)
+        self.export_s21_button.setEnabled(file_count == 1)
         verb = "Reviewed" if file_count == 1 else "Compared"
         file_word = "file" if file_count == 1 else "files"
         self.statusBar().showMessage(
@@ -579,6 +591,36 @@ class CompareMainWindow(QMainWindow):
 
         self.statusBar().showMessage(
             f"Excel report exported to {destination}", 5000)
+
+    def _export_s21(self) -> None:
+        if self.latest_result is None or len(self.latest_result.file_order) != 1:
+            return
+
+        destination, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export S21 Insertion Loss (CSV)",
+            "s21_insertion_loss.csv",
+            "CSV Files (*.csv)",
+        )
+        if not destination:
+            return
+
+        try:
+            freq = self.latest_result.frequency_ghz
+            file_name = self.latest_result.file_order[0]
+            s21_db = self.latest_result.magnitude_db[file_name]["S21"]
+
+            import csv
+            with open(destination, mode="w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Frequency (GHz)", "S21 (dB)"])
+                for freq_val, s21_val in zip(freq, s21_db):
+                    writer.writerow([f"{freq_val:.6f}", f"{s21_val:.6f}"])
+
+            self.statusBar().showMessage(
+                f"S21 exported successfully to {destination}", 5000)
+        except Exception as exc:  # pragma: no cover - UI path only
+            QMessageBox.critical(self, "Export Error", f"Could not write S21 CSV:\n{exc}")
 
     def _clear_results(self, message: str) -> None:
         self.figure.clear()
