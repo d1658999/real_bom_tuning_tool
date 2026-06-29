@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -33,6 +34,9 @@ import numpy as np
 
 from rf_kpi_compare_tool.comparison import (
     DIFFERENCE_HEADERS,
+    PORT_ALIGNMENT_DEFAULT,
+    PORT_ALIGNMENT_LABELS,
+    PORT_ALIGNMENT_SWAP,
     SUMMARY_HEADERS,
     ComparisonResult,
     PARAMETER_INDEXES,
@@ -90,8 +94,9 @@ class CompareMainWindow(QMainWindow):
         control_layout.addWidget(title)
 
         intro = QLabel(
-            "Load two or more .s2p files, choose a frequency window within the shared range, "
-            "then compare Smith charts, transmission, return loss, and VSWR in one view."
+            "Load one or more .s2p files, choose a frequency window within the shared range, "
+            "optionally swap reversed file ports, then compare Smith charts, transmission, "
+            "return loss, and VSWR in one view."
         )
         intro.setWordWrap(True)
         control_layout.addWidget(intro)
@@ -109,6 +114,28 @@ class CompareMainWindow(QMainWindow):
         file_button_row.addWidget(self.remove_files_button)
         file_button_row.addWidget(self.clear_files_button)
         control_layout.addLayout(file_button_row)
+
+        alignment_group = QGroupBox("Selected File Port Alignment", self)
+        alignment_layout = QVBoxLayout(alignment_group)
+        alignment_intro = QLabel(
+            "If a file was measured with reversed ports, apply a swapped mapping to the selected file(s)."
+        )
+        alignment_intro.setWordWrap(True)
+        alignment_layout.addWidget(alignment_intro)
+        self.port_alignment_combo = QComboBox(self)
+        for alignment in (PORT_ALIGNMENT_DEFAULT, PORT_ALIGNMENT_SWAP):
+            self.port_alignment_combo.addItem(
+                PORT_ALIGNMENT_LABELS[alignment], alignment)
+        alignment_layout.addWidget(self.port_alignment_combo)
+        self.apply_port_alignment_button = QPushButton(
+            "Apply To Selected Files", self)
+        alignment_layout.addWidget(self.apply_port_alignment_button)
+        self.port_alignment_status_label = QLabel(
+            "Select one or more loaded files to review or change their port mapping."
+        )
+        self.port_alignment_status_label.setWordWrap(True)
+        alignment_layout.addWidget(self.port_alignment_status_label)
+        control_layout.addWidget(alignment_group)
 
         range_group = QGroupBox("Frequency Range (GHz)", self)
         range_layout = QVBoxLayout(range_group)
@@ -135,18 +162,20 @@ class CompareMainWindow(QMainWindow):
         self.export_s21_button = QPushButton("Export S21 (CSV)", self)
         row1.addWidget(self.compare_button)
         row1.addWidget(self.export_s21_button)
-        
+
         row2 = QHBoxLayout()
         self.export_pdf_button = QPushButton("Export PDF", self)
         self.export_excel_button = QPushButton("Export Excel", self)
         row2.addWidget(self.export_pdf_button)
         row2.addWidget(self.export_excel_button)
-        
+
         action_layout.addLayout(row1)
         action_layout.addLayout(row2)
         control_layout.addLayout(action_layout)
 
-        self.hint_label = QLabel("Only valid 2-port .s2p files are accepted.")
+        self.hint_label = QLabel(
+            "Only valid 2-port .s2p files are accepted. Use port alignment if a file needs S1 and S2 swapped."
+        )
         self.hint_label.setWordWrap(True)
         control_layout.addWidget(self.hint_label)
         control_layout.addStretch(1)
@@ -190,6 +219,10 @@ class CompareMainWindow(QMainWindow):
         self.add_files_button.clicked.connect(self._add_files)
         self.remove_files_button.clicked.connect(self._remove_selected_files)
         self.clear_files_button.clicked.connect(self._clear_loaded_files)
+        self.file_list.itemSelectionChanged.connect(
+            self._refresh_port_alignment_controls)
+        self.apply_port_alignment_button.clicked.connect(
+            self._apply_selected_port_alignment)
         self.use_common_range_button.clicked.connect(self._apply_shared_range)
         self.compare_button.clicked.connect(self._run_comparison)
         self.export_pdf_button.clicked.connect(self._export_pdf)
@@ -246,11 +279,7 @@ class CompareMainWindow(QMainWindow):
             QMessageBox.warning(self, "Load Error", "\n\n".join(load_errors))
 
     def _remove_selected_files(self) -> None:
-        selected_paths = {
-            Path(item.data(Qt.UserRole))
-            for item in self.file_list.selectedItems()
-            if item.data(Qt.UserRole)
-        }
+        selected_paths = self._selected_file_paths()
         if not selected_paths:
             return
 
@@ -269,15 +298,22 @@ class CompareMainWindow(QMainWindow):
         self._refresh_state()
         self.statusBar().showMessage("All files cleared.", 3000)
 
-    def _refresh_file_list(self) -> None:
+    def _refresh_file_list(self, selected_paths: set[Path] | None = None) -> None:
+        selected_paths = selected_paths or set()
         self.file_list.clear()
         for loaded in self.loaded_networks:
             item = QListWidgetItem(
-                f"{loaded.display_name}  [{loaded.min_freq_ghz:.6f} - {loaded.max_freq_ghz:.6f} GHz]"
+                (
+                    f"{loaded.display_name}  [{loaded.min_freq_ghz:.6f} - {loaded.max_freq_ghz:.6f} GHz]  "
+                    f"[{loaded.port_alignment_label}]"
+                )
             )
-            item.setToolTip(str(loaded.path))
+            item.setToolTip(
+                f"{loaded.path}\nPort alignment: {loaded.port_alignment_label}")
             item.setData(Qt.UserRole, str(loaded.path))
             self.file_list.addItem(item)
+            if loaded.path in selected_paths:
+                item.setSelected(True)
 
     def _refresh_state(self) -> None:
         self.latest_result = None
@@ -294,6 +330,7 @@ class CompareMainWindow(QMainWindow):
             self.export_s21_button.setEnabled(False)
             self._clear_results(
                 "Add at least one .s2p file to start.")
+            self._refresh_port_alignment_controls()
             return
 
         range_start, range_stop = shared_range
@@ -331,6 +368,83 @@ class CompareMainWindow(QMainWindow):
             self._clear_results(
                 "Choose a valid frequency window inside the shared range, then click Compare."
             )
+        self._refresh_port_alignment_controls()
+
+    def _selected_file_paths(self) -> set[Path]:
+        return {
+            Path(item.data(Qt.UserRole))
+            for item in self.file_list.selectedItems()
+            if item.data(Qt.UserRole)
+        }
+
+    def _selected_loaded_networks(self) -> list[LoadedNetwork]:
+        selected_paths = self._selected_file_paths()
+        return [
+            loaded for loaded in self.loaded_networks if loaded.path in selected_paths
+        ]
+
+    def _refresh_port_alignment_controls(self) -> None:
+        if not self.loaded_networks:
+            self.port_alignment_combo.setEnabled(False)
+            self.apply_port_alignment_button.setEnabled(False)
+            self.port_alignment_status_label.setText(
+                "Load at least one .s2p file to control port alignment."
+            )
+            return
+
+        selected_networks = self._selected_loaded_networks()
+        if not selected_networks:
+            self.port_alignment_combo.setEnabled(False)
+            self.apply_port_alignment_button.setEnabled(False)
+            self.port_alignment_status_label.setText(
+                "Select one or more loaded files to keep the default mapping or swap their ports."
+            )
+            return
+
+        self.port_alignment_combo.setEnabled(True)
+        self.apply_port_alignment_button.setEnabled(True)
+
+        alignments = {loaded.port_alignment for loaded in selected_networks}
+        if len(alignments) == 1:
+            alignment = selected_networks[0].port_alignment
+            combo_index = self.port_alignment_combo.findData(alignment)
+            if combo_index >= 0:
+                self.port_alignment_combo.setCurrentIndex(combo_index)
+            self.port_alignment_status_label.setText(
+                f"{len(selected_networks)} selected file(s) currently use: {selected_networks[0].port_alignment_label}."
+            )
+            return
+
+        self.port_alignment_status_label.setText(
+            f"{len(selected_networks)} selected file(s) currently use mixed mappings. Choose a value to overwrite them."
+        )
+
+    def _apply_selected_port_alignment(self) -> None:
+        selected_networks = self._selected_loaded_networks()
+        if not selected_networks:
+            return
+
+        selected_paths = {loaded.path for loaded in selected_networks}
+        port_alignment = self.port_alignment_combo.currentData()
+        changed = 0
+        for loaded in selected_networks:
+            if loaded.port_alignment == port_alignment:
+                continue
+            loaded.set_port_alignment(port_alignment)
+            changed += 1
+
+        if changed == 0:
+            self.statusBar().showMessage(
+                "Selected files already use that port mapping.", 4000)
+            self._refresh_port_alignment_controls()
+            return
+
+        self._refresh_file_list(selected_paths)
+        self._refresh_state()
+        self.statusBar().showMessage(
+            f"Updated port mapping for {changed} file(s). Click {self.compare_button.text()} to refresh the plots.",
+            5000,
+        )
 
     def _shared_range_for_ui(self) -> tuple[float, float] | None:
         if not self.loaded_networks:
@@ -620,7 +734,8 @@ class CompareMainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"S21 exported successfully to {destination}", 5000)
         except Exception as exc:  # pragma: no cover - UI path only
-            QMessageBox.critical(self, "Export Error", f"Could not write S21 CSV:\n{exc}")
+            QMessageBox.critical(self, "Export Error",
+                                 f"Could not write S21 CSV:\n{exc}")
 
     def _clear_results(self, message: str) -> None:
         self.figure.clear()

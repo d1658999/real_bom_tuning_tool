@@ -4,6 +4,7 @@ This tool compares two or more 2-port Touchstone `.s2p` files over a shared freq
 
 Features:
 - Multi-file `.s2p` selection with validation for valid 2-port Touchstone data.
+- Per-file port alignment control so a reversed file can be treated as `S1/S2` or swapped to `S2/S1`.
 - Shared-range frequency selection so comparisons only run where every file has data.
 - Overlaid Smith charts for `S11` and `S22`.
 - Overlaid transmission plots for `S21` and `S12`.
@@ -33,10 +34,11 @@ Build prerequisites:
 
 Workflow:
 1. Add two or more `.s2p` files.
-2. Review the shared frequency range shown in the left panel.
-3. Set the start and stop frequency in GHz.
-4. Click `Compare`.
-5. Export a PDF or Excel report if needed.
+2. If needed, select one or more files and use `Selected File Port Alignment` to keep the default port order or swap the ports.
+3. Review the shared frequency range shown in the left panel.
+4. Set the start and stop frequency in GHz.
+5. Click `Compare`.
+6. Export a PDF or Excel report if needed.
 
 Notes:
 - The tool uses the first loaded file as the baseline for pairwise delta reporting.

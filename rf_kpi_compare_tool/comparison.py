@@ -16,6 +16,19 @@ PARAMETER_INDEXES: dict[str, tuple[int, int]] = {
     "S22": (1, 1),
 }
 
+PORT_ALIGNMENT_DEFAULT = "default"
+PORT_ALIGNMENT_SWAP = "swap"
+
+PORT_ALIGNMENT_LABELS: dict[str, str] = {
+    PORT_ALIGNMENT_DEFAULT: "Port 1 -> S1, Port 2 -> S2",
+    PORT_ALIGNMENT_SWAP: "Port 1 -> S2, Port 2 -> S1",
+}
+
+PORT_ALIGNMENT_PERMUTATIONS: dict[str, tuple[int, int]] = {
+    PORT_ALIGNMENT_DEFAULT: (0, 1),
+    PORT_ALIGNMENT_SWAP: (1, 0),
+}
+
 RETURN_LOSS_PARAMETERS = {"S11", "S22"}
 
 SUMMARY_HEADERS = [
@@ -47,6 +60,14 @@ class LoadedNetwork:
     freq_ghz: np.ndarray
     min_freq_ghz: float
     max_freq_ghz: float
+    port_alignment: str = PORT_ALIGNMENT_DEFAULT
+
+    def set_port_alignment(self, port_alignment: str) -> None:
+        self.port_alignment = _validate_port_alignment(port_alignment)
+
+    @property
+    def port_alignment_label(self) -> str:
+        return PORT_ALIGNMENT_LABELS[self.port_alignment]
 
     @classmethod
     def from_path(cls, path: str | Path, display_name: str | None = None) -> "LoadedNetwork":
@@ -75,6 +96,7 @@ class LoadedNetwork:
             freq_ghz=freq_ghz,
             min_freq_ghz=float(freq_ghz[0]),
             max_freq_ghz=float(freq_ghz[-1]),
+            port_alignment=PORT_ALIGNMENT_DEFAULT,
         )
 
 
@@ -103,6 +125,7 @@ class DeltaRow:
 @dataclass(slots=True)
 class ComparisonResult:
     file_order: list[str]
+    port_alignment_by_file: dict[str, str]
     frequency_ghz: np.ndarray
     traces: dict[str, dict[str, np.ndarray]]
     magnitude_db: dict[str, dict[str, np.ndarray]]
@@ -149,6 +172,9 @@ def compare_networks(
 
     target_freq_ghz = _build_frequency_axis(
         items, selected_start_ghz, selected_stop_ghz)
+    port_alignment_by_file = {
+        item.display_name: _validate_port_alignment(item.port_alignment) for item in items
+    }
     traces: dict[str, dict[str, np.ndarray]] = {}
     magnitude_db: dict[str, dict[str, np.ndarray]] = {}
     return_loss_db: dict[str, dict[str, np.ndarray]] = {}
@@ -159,7 +185,11 @@ def compare_networks(
         magnitude_db[item.display_name] = {}
         return_loss_db[item.display_name] = {}
         vswr[item.display_name] = {}
-        for parameter, (row_idx, col_idx) in PARAMETER_INDEXES.items():
+        for parameter in PARAMETER_INDEXES:
+            row_idx, col_idx = _mapped_parameter_indexes(
+                parameter,
+                port_alignment_by_file[item.display_name],
+            )
             trace = _interpolate_complex(
                 item.freq_ghz,
                 np.asarray(item.network.s[:, row_idx,
@@ -179,6 +209,7 @@ def compare_networks(
 
     return ComparisonResult(
         file_order=[item.display_name for item in items],
+        port_alignment_by_file=port_alignment_by_file,
         frequency_ghz=target_freq_ghz,
         traces=traces,
         magnitude_db=magnitude_db,
@@ -198,7 +229,7 @@ def build_summary_lines(result: ComparisonResult) -> list[str]:
     lines = [
         "RF KPI Comparison Report",
         "",
-        f"Files compared: {', '.join(result.file_order)}",
+        f"Files compared: {_format_file_descriptions(result)}",
         (
             "Selected range (GHz): "
             f"{result.selected_start_ghz:.6f} - {result.selected_stop_ghz:.6f}"
@@ -207,7 +238,7 @@ def build_summary_lines(result: ComparisonResult) -> list[str]:
             "Shared range (GHz): "
             f"{result.common_start_ghz:.6f} - {result.common_stop_ghz:.6f}"
         ),
-        f"Baseline file: {result.baseline_file}",
+        f"Baseline file: {_format_file_description(result.baseline_file, result.port_alignment_by_file[result.baseline_file])}",
         "",
         "Per-file metrics:",
     ]
@@ -262,6 +293,31 @@ def export_excel_report(
         _write_plot_sheet(workbook, result, plot_image, title_fmt)
     finally:
         workbook.close()
+
+
+def _validate_port_alignment(port_alignment: str) -> str:
+    if port_alignment not in PORT_ALIGNMENT_PERMUTATIONS:
+        raise ValueError(f"Unsupported port alignment: {port_alignment}")
+    return port_alignment
+
+
+def _mapped_parameter_indexes(parameter: str, port_alignment: str) -> tuple[int, int]:
+    row_idx, col_idx = PARAMETER_INDEXES[parameter]
+    permutation = PORT_ALIGNMENT_PERMUTATIONS[_validate_port_alignment(
+        port_alignment)]
+    return permutation[row_idx], permutation[col_idx]
+
+
+def _format_file_description(file_name: str, port_alignment: str) -> str:
+    return f"{file_name} ({PORT_ALIGNMENT_LABELS[port_alignment]})"
+
+
+def _format_file_descriptions(result: ComparisonResult) -> str:
+    return "; ".join(
+        _format_file_description(
+            file_name, result.port_alignment_by_file[file_name])
+        for file_name in result.file_order
+    )
 
 
 def _validate_frequency_range(
@@ -384,7 +440,7 @@ def _write_summary_sheet(workbook, result, title_fmt, header_fmt, text_fmt, numb
     worksheet.set_column(0, 7, 22)
     worksheet.write("A1", "RF KPI Comparison Report", title_fmt)
     worksheet.write("A3", "Compared Files")
-    worksheet.write("B3", ", ".join(result.file_order))
+    worksheet.write("B3", _format_file_descriptions(result))
     worksheet.write("A4", "Selected Range (GHz)")
     worksheet.write(
         "B4",
@@ -396,7 +452,13 @@ def _write_summary_sheet(workbook, result, title_fmt, header_fmt, text_fmt, numb
         f"{result.common_start_ghz:.6f} - {result.common_stop_ghz:.6f}",
     )
     worksheet.write("A6", "Baseline File")
-    worksheet.write("B6", result.baseline_file)
+    worksheet.write(
+        "B6",
+        _format_file_description(
+            result.baseline_file,
+            result.port_alignment_by_file[result.baseline_file],
+        ),
+    )
 
     for column_index, header in enumerate(SUMMARY_HEADERS):
         worksheet.write(6, column_index, header, header_fmt)
@@ -461,7 +523,7 @@ def _write_plot_sheet(workbook, result, plot_image: BytesIO | None, title_fmt) -
     worksheet = workbook.add_worksheet("Plots")
     worksheet.write("A1", "Comparison Plot Overview", title_fmt)
     worksheet.write("A3", "Files")
-    worksheet.write("B3", ", ".join(result.file_order))
+    worksheet.write("B3", _format_file_descriptions(result))
     worksheet.write("A4", "Selected Range (GHz)")
     worksheet.write(
         "B4",
